@@ -1,6 +1,70 @@
+# Render blueprint — one repo, one Dockerfile, two services + managed Postgres.
+#
+#   opengym-web  : nginx bundle (target web)   → public URL, proxies /api
+#   opengym-api  : NestJS API (target api)     → private service (pserv)
+#   opengym-db   : managed PostgreSQL 16       → DATABASE_URL wired automatically
+#
+# First deploy: Render prompts for every `sync: false` var (values from .env.example).
+
+databases:
+  - name: opengym-db
+    databaseName: opengym
+    user: opengym
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
 services:
+  # Public entrypoint: nginx serving the three bundles + /api reverse proxy.
   - type: web
-    name: opengym
+    name: opengym-web
     env: docker
+    plan: starter
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    dockerCommand: "nginx -g 'daemon off;'"
+    healthCheckPath: /api/health        # proxied through nginx to the API
+    envVars:
+      # nginx listens on 80; point Render's router at it
+      - key: PORT
+        value: "80"
+
+  # Private API: runs migrations then boots NestJS on every deploy.
+  - type: pserv
+    name: opengym-api
+    env: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: "sh -c 'node scripts/migrate.js && node dist/apps/api/src/main.js'"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: opengym-db
+          property: connectionString
+      - key: PORT
+        value: "3000"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PUBLIC_APP_URL
+        sync: false                     # e.g. https://opengym-web.onrender.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+        secret: true
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+        secret: true
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+        secret: true
+      - key: VAPID_SUBJECT
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false                     # add the final web URL once known

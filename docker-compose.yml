@@ -1,8 +1,29 @@
 name: opengym
 
 services:
-  # One-time: download the exercise images + GIFs into ./media (skipped if already there).
-  # ~140 MB, from github.com/hasaneyldrm/exercises-dataset (CC).
+  # ---------------------------------------------------------------- postgres
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-opengym}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_* in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-opengym}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # loopback-only so dev.sh / host tools can reach it; not public
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opengym} -d ${POSTGRES_DB:-opengym}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  # ------------------------------------------------------------------ media
+  # One-time: download the exercise images + GIFs into ./media (skipped if
+  # already there). ~140 MB, from github.com/hasaneyldrm/exercises-dataset (CC).
   media:
     image: alpine/git
     volumes:
@@ -21,26 +42,44 @@ services:
         fi
     restart: "no"
 
-  # Passkey auth + per-user data (Node, no framework).
-  # image: prebuilt (docker compose pull). build: from source (docker compose up --build).
+  # -------------------------------------------------------------------- api
+  # NestJS API. Stateless; Postgres state lives in the pgdata volume.
   api:
-    image: ghcr.io/duartesantos8/opengym-api:latest
-    build: ./api
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - PORT=3000            # internal port (nginx proxies here) — do not change
-      - DATA_DIR=/data
-    volumes:
-      - ./data:/data         # users, passkeys, per-user state, session secret — BACK THIS UP
-
-  # Builds the React frontend (multi-stage) and serves it, proxying /api → api
-  # and the exercise media from the shared volume. Single origin for passkeys.
-  web:
-    image: ghcr.io/duartesantos8/opengym-web:latest
     build:
       context: .
-      dockerfile: web/Dockerfile
+      dockerfile: Dockerfile
+      target: api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"                       # internal only — reached via web proxy
+    environment:
+      # service-to-service: host is the compose service name, NOT localhost
+      DATABASE_URL: postgresql://${POSTGRES_USER:-opengym}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-opengym}
+      PORT: "3000"
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    # migrate deploy uses the prisma CLI vendored inside the image
+    # (see apps/api/scripts/migrate.js) before booting the server.
+    command: ["/bin/sh", "-c", "node scripts/migrate.js && node dist/apps/api/src/main.js"]
+
+  # -------------------------------------------------------------------- web
+  # nginx: member PWA (/), trainer (/coach/), admin (/admin/), proxies /api.
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
     restart: unless-stopped
     depends_on:
       media:
@@ -50,5 +89,8 @@ services:
     ports:
       - "${WEB_PORT:-8080}:80"
     volumes:
-      - ./media/img:/usr/share/nginx/html/img:ro
-      - ./media/gif:/usr/share/nginx/html/gif:ro
+      - ./media/img:/usr/share/nginx/media/img:ro
+      - ./media/gif:/usr/share/nginx/media/gif:ro
+
+volumes:
+  pgdata:

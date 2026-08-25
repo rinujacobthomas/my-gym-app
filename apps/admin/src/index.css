@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   openGym — design tokens + Tailwind theme
+   ----------------------------------------------------------------------------
+   All styling is Tailwind utilities in the components. This file keeps only
+   what utilities can't express inline:
+   · the runtime theme system (dark/light + per-account accent, switched via
+     data-attributes on <html>) — utilities reference these custom properties
+   · the icon primitive (.icn) and the keyframes used by animate-[...] classes
+   The DEFAULT ACCENT is RED (user preference), selectable accents unchanged.
+   ========================================================================== */
+
+@theme inline {
+  --breakpoint-desk: 1000px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, system-ui, sans-serif;
+
+  --color-bg: var(--bg);
+  --color-bg-el: var(--bg-el);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-label: var(--label);
+  --color-label-2: var(--label-2);
+  --color-label-3: var(--label-3);
+  --color-label-4: var(--label-4);
+  --color-sep: var(--sep);
+  --color-sep-op: var(--sep-op);
+  --color-seg-track: var(--seg-track);
+  --color-acc: var(--acc);
+  --color-acc-2: var(--acc-2);
+  --color-on-acc: var(--on-acc);
+  --color-acc-soft: var(--acc-soft);
+  --color-acc-line: var(--acc-line);
+  --color-blue: var(--blue);
+  --color-green: var(--green);
+  --color-red: var(--red);
+  --color-orange: var(--orange);
+  --color-yellow: var(--yellow);
+  --color-teal: var(--teal);
+  --color-indigo: var(--indigo);
+  --color-pink: var(--pink);
+  --color-purple: var(--purple);
+  --color-mint: var(--mint);
+  --color-brown: var(--brown);
+  --color-grey: var(--grey);
+}
+
+/* ---------------------------------------------------------------- tokens -- */
+:root {
+  /* surfaces — dark is the default */
+  --bg:        #000000;
+  --bg-el:     #0e0e10;   /* elevated backdrop (sheets, bars) */
+  --surface:   #1c1c1e;   /* card / grouped-list fill */
+  --surface-2: #2c2c2e;   /* pressed + nested fill */
+  --surface-3: #3a3a3c;   /* controls (segmented track, switch off) */
+
+  /* text */
+  --label:     #ffffff;
+  --label-2:   rgba(235,235,245,.60);
+  --label-3:   rgba(235,235,245,.32);
+  --label-4:   rgba(235,235,245,.18);
+
+  /* lines */
+  --sep:       rgba(84,84,88,.60);
+  --sep-op:    rgba(84,84,88,.34);
+  --hair:      .5px;
+  --seg-track: #3a3a3c;
+
+  /* system palette (iOS dark values) */
+  --blue:#0a84ff; --green:#30d158; --red:#ff453a; --orange:#ff9f0a;
+  --yellow:#ffd60a; --teal:#40c8e0; --indigo:#5e5ce6; --pink:#ff375f;
+  --purple:#bf5af2; --mint:#63e6e2; --brown:#ac8e68; --grey:#8e8e93;
+
+  /* accent (per-account, synced) — RED is the default */
+  --acc:  var(--red);
+  --acc-2:#d70015;
+  --on-acc:#ffffff;
+  --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
+  --acc-line: color-mix(in srgb, var(--acc) 38%, transparent);
+
+  /* geometry */
+  --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:22px; --r-card:14px;
+  --pad:16px;
+
+  --ease:cubic-bezier(.32,.72,0,1);
+  --fast:140ms; --med:220ms;
+
+  --sab:env(safe-area-inset-bottom,0px);
+  --sat:env(safe-area-inset-top,0px);
+
+  /* muscle-map shading, derived from the text colour so contrast holds in both themes */
+  --bm-sil: color-mix(in srgb, var(--label) 18%, var(--surface));
+  --bm-base: color-mix(in srgb, var(--label) 11%, var(--surface));
+  --bm-1: color-mix(in srgb, var(--acc) 32%, var(--bm-base));
+  --bm-2: color-mix(in srgb, var(--acc) 56%, var(--bm-base));
+  --bm-3: color-mix(in srgb, var(--acc) 78%, var(--bm-base));
+}
+
+:root[data-theme="light"] {
+  --bg:        #f2f2f7;
+  --bg-el:     #f7f7fa;
+  --surface:   #ffffff;
+  --surface-2: #ececef;
+  --surface-3: #e3e3e8;
+
+  --label:     #000000;
+  --label-2:   rgba(60,60,67,.60);
+  --label-3:   rgba(60,60,67,.30);
+  --label-4:   rgba(60,60,67,.16);
+
+  --sep:       rgba(60,60,67,.29);
+  --sep-op:    rgba(60,60,67,.20);
+  --seg-track: rgba(118,118,128,.12);
+
+  --blue:#007aff; --green:#34c759; --red:#ff3b30; --orange:#ff9500;
+  --yellow:#ffcc00; --teal:#30b0c7; --indigo:#5856d6; --pink:#ff2d55;
+  --purple:#af52de; --mint:#00c7be; --brown:#a2845e; --grey:#8e8e93;
+}
+
+/* accents — Apple's system colours; red is the default (see :root) */
+:root[data-accent="lime"]  { --acc:var(--green);  --acc-2:#248a3d; --on-acc:#000 }
+:root[data-accent="sky"]   { --acc:var(--blue);   --acc-2:#0060df; --on-acc:#fff }
+:root[data-accent="orange"]{ --acc:var(--orange); --acc-2:#c76b00; --on-acc:#000 }
+:root[data-accent="violet"]{ --acc:var(--purple); --acc-2:#8944ab; --on-acc:#fff }
+:root[data-accent="pink"]  { --acc:var(--pink);   --acc-2:#d70036; --on-acc:#fff }
+:root[data-accent="red"]   { --acc:var(--red);    --acc-2:#d70015; --on-acc:#fff }
+:root[data-accent="teal"]  { --acc:var(--teal);   --acc-2:#0071a4; --on-acc:#000 }
+:root[data-accent="gold"]  { --acc:var(--yellow); --acc-2:#b25000; --on-acc:#000 }
+/* Button label colour per accent by measured contrast (AA large text = 3:1 at 17px/600).
+   Light-theme lime/teal need black (white fails); the rest carry white. */
+:root[data-theme="light"][data-accent="lime"],
+:root[data-theme="light"][data-accent="teal"]  { --on-acc:#000 }
+:root[data-theme="light"][data-accent="sky"],
+:root[data-theme="light"][data-accent="violet"],
+:root[data-theme="light"][data-accent="pink"],
+:root[data-theme="light"][data-accent="red"]   { --on-acc:#fff }
+
+/* ------------------------------------------------------------------ base -- */
+@layer base {
+  html{
+    background:var(--bg);overscroll-behavior:none;overflow-x:clip;
+    -webkit-text-size-adjust:100%;
+    color-scheme:dark;
+  }
+  :root[data-theme="light"]{color-scheme:light}
+  body{
+    background:var(--bg);color:var(--label);
+    font-family:var(--font-sans);
+    @apply text-[17px] leading-[1.29] tracking-[-.01em] antialiased;
+    min-height:100vh;overscroll-behavior-y:none;overflow-x:clip;
+    touch-action:manipulation;
+    font-variant-numeric:tabular-nums;
+  }
+  button{cursor:pointer;color:inherit;letter-spacing:inherit}
+  input,select,textarea{color:var(--label);letter-spacing:inherit}
+  a{color:var(--acc);text-decoration:none}
+  :focus{outline:none}
+  :focus-visible{outline:2.5px solid var(--acc);outline-offset:2px;border-radius:6px}
+}
+
+@utility no-tap {
+  -webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;user-select:none;
+}
+
+/* icons inherit colour and optical size from their context */
+@utility icn {
+  width:1em;height:1em;flex:none;display:block;
+  fill:none;stroke:currentColor;stroke-width:var(--icon-stroke,1.7);
+  stroke-linecap:round;stroke-linejoin:round;
+}
+
+/* ------------------------------------------------------------- keyframes -- */
+@keyframes viewfade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes sheetup{from{transform:translateY(100%)}to{transform:none}}
+@keyframes pop{from{transform:translate(-50%,-50%) scale(.94);opacity:0}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
+@keyframes slideup{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+@keyframes drawer{from{transform:translateX(32px);opacity:0}to{transform:none;opacity:1}}
+@keyframes ping{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.45);opacity:0}}
+
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+/* while the rest timer floats above the tab bar, keep its height scrollable-past */
+body.resting #app{padding-bottom:calc(250px + var(--sab))}
+
+/* list-row hairline: starts after the icon rail so the list reads as one object.
+   A sibling-combinator + :has() rule — not expressible as a per-element utility. */
+@utility lrow {
+  &:not(:first-child)::before{
+    content:'';position:absolute;left:14px;right:0;top:0;height:var(--hair);background:var(--sep);
+  }
+  &:has(.lrow-i):not(:first-child)::before{left:55px}
+}

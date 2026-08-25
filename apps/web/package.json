@@ -1,0 +1,31 @@
+{
+  "name": "@og/web",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "@og/api-client": "workspace:*",
+    "@og/core": "workspace:*",
+    "@og/ui": "workspace:*",
+    "@tanstack/react-query": "^5.102.3",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.2",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.1.5",
+    "vitest": "^3.2.4"
+  }
+}

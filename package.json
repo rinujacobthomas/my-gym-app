@@ -1,0 +1,25 @@
+{
+  "name": "opengym",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:migrate": "pnpm --filter @og/api db:migrate",
+    "db:seed": "pnpm --filter @og/api db:seed",
+    "db:studio": "pnpm --filter @og/api db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.8",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "@tailwindcss/oxide"
+    ]
+  }
+}

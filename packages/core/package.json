@@ -1,0 +1,14 @@
+{
+  "name": "@og/core",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "license": "AGPL-3.0-or-later"
+}

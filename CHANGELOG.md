@@ -1,5 +1,58 @@
 # Changelog
 
+## 2.0.0 — 2026-08-25
+
+openGym grew from a self-hosted personal tracker into a **gym management platform**: the same
+training core, now serving a whole gym — members, trainers and the front desk.
+
+### What changed, in one breath
+
+One member app became three apps (member PWA at `/`, coach console at `/coach`, admin console
+at `/admin`) over a new NestJS + Prisma + PostgreSQL backend. Passkey profiles gave way to
+Google login with admin-approved signups. JSON-file storage became a real database. The whole
+business of running a gym — plans, payments, bookings, attendance, approvals — is now in the
+product.
+
+### Members
+
+- 🔑 Google sign-in; new accounts wait in an approval queue instead of self-serving a profile.
+- ▶️ The guided workout, progression rules, PRs, stats, muscle map and heatmap carried over from v1.
+- 🍽️ New calorie & macro tracker: OpenFoodFacts search + barcode scanning via a cached server proxy, water intake, favorites, TDEE targets.
+- 🗓️ Slot booking with capacity, auto-promoting waitlist, grace-cancel (one free late cancel/month), weekly auto-book patterns, and walk-in support at the desk.
+- 📷 Daily QR check-in code (HMAC-based, rotates every day).
+- 💳 Buy/renew/freeze memberships in-app via Razorpay (UPI/cards), with a full payment history and a renew wall when expired — history stays readable, plus a 3-day grace window.
+- 🎯 Trainer-assigned programs whose days unlock as you complete them; exercise library starts gated for beginners until your trainer unlocks more.
+- 🔔 Push notifications: booking confirmations, expiry reminders, tomorrow nudges, workout-day reminder (ported from v1), rest-timer alerts.
+
+### Trainers
+
+- 🆕 Coach console: live attendance per slot, QR scanner check-in, availability with breaks/buffers between PT sessions.
+- 🏗️ Program builder (weeks → days → exercises) with assignment and progressive day unlocks.
+- 🔓 Exercise unlock presets ("Beginner set", "Full library") applied per client, plus an "experienced" switch that opens the whole library.
+- 🩹 Injury notes that show as a red banner on the client's profile; PT booking board with complete/cancel.
+
+### Admins
+
+- 🆕 Management console: signup approval queue; people & roles including a receptionist STAFF role limited to check-in + cash entry.
+- 💰 Plans & payments ledger: online payments land automatically; manual cash/card recording, UTR matching, refund marking, dispute logging; day passes for walk-ins.
+- 📊 Revenue/attendance/growth/popular-exercise analytics, CSV exports, announcements by audience (all / active / expiring / lapsed), audit log, gym settings (hours, booking window, cancel cutoff, freeze limits, day-pass price).
+- 🌙 Nightly housekeeping: slot generation across the booking window, auto-book, no-show sweep, expiry reminders, stale-order cleanup.
+
+### Under the hood
+
+- 🏗️ Turborepo/pnpm monorepo: `apps/web` + `apps/trainer` + `apps/admin` + `apps/api`, shared `packages/core` (pure training logic), `packages/ui`, `packages/api-client`.
+- 🗄️ NestJS 11 + Prisma 6 + PostgreSQL 16 replace the JSON-file store; money is integer paise, all money/capacity decisions server-side. React 19 + Vite + Tailwind 4 + Zustand + TanStack Query on the front.
+- 🐳 Docker Compose: Postgres, API, one nginx serving all three consoles with `/api` proxied, and a one-shot media clone (~140 MB exercise dataset).
+- 📱 Web-only now: the Capacitor mobile shell and APK are removed — every app is an installable PWA.
+- 🧪 Training math stays in pure functions (`packages/core`) with Vitest suites; `turbo test` gates builds.
+
+### Migrating from v1
+
+Passkey profiles have no email, so they can't map onto Google accounts. Sign up fresh, then run
+`node scripts/import-legacy.mjs` against your old `./data` folder — it exports each profile's
+workout history and body-weight log for best-effort reattachment to the new account. Nothing in
+v1 data is modified or deleted.
+
 ## v1.2.4 — 2026-08-01
 
 The effort ratings you have been recording since v1.2.3 now answer questions, and bodyweight

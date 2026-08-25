@@ -1,0 +1,42 @@
+# Keeps the Docker build context small and secrets out of images.
+# NOTE: this file was added alongside Dockerfile (deployment infra); it touches
+# no app source, package.json, docs or README.
+
+# --- VCS / tooling noise ---
+.git
+.gitignore
+.opencode
+.agents
+.playwright-mcp
+skills-lock.json
+*.DS_Store
+
+# --- secrets (never bake these in) ---
+.env
+data/
+data-import/
+
+# --- dependencies & build output (rebuilt inside the image) ---
+node_modules
+**/node_modules
+**/dist
+.turbo
+
+# --- legacy pre-monorepo dirs (superseded by apps/*) ---
+api/
+frontend/
+website/
+web/
+
+# --- large runtime assets: media is mounted at runtime by compose ---
+media/
+
+# --- docs / screenshots not needed in build context ---
+docs/
+*.md
+*.png
+LICENSE
+NOTICE.md
+CHANGELOG.md
+SECURITY.md
+CONTRIBUTING.md

@@ -1,0 +1,47 @@
+# ---------------- dependencies ----------------
+node_modules/
+.pnpm-store/
+
+# ---------------- secrets / env ----------------
+.env
+.env.*
+!.env.example
+# legacy self-host data dir — contains session secrets & user data, NEVER commit
+data/
+data-import/
+
+# ---------------- build output ----------------
+dist/
+dev-dist/
+build/
+out/
+.turbo/
+coverage/
+*.tsbuildinfo
+apps/api/generated/
+
+# ---------------- runtime-cloned assets ----------------
+# exercise images/GIFs are cloned by the docker "media" service at deploy time
+media/
+
+# ---------------- tooling / local ----------------
+.playwright-mcp/
+.agents/
+.opencode/
+skills-lock.json
+
+# ---------------- logs ----------------
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---------------- OS / editor junk ----------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

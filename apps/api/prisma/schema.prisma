@@ -1,0 +1,592 @@
+// openGym platform schema — Prisma + PostgreSQL.
+// Money is stored in paise (int). Times-of-day are minutes-from-midnight (int) in gym-local
+// time; dates are @db.Date. Nothing here trusts the client for money or capacity.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TRAINER
+  STAFF // reception desk — check-in + cash entry only
+  MEMBER
+}
+
+enum AccountStatus {
+  PENDING // signed up, waiting for admin approval
+  ACTIVE
+  DISABLED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  ONLINE // Razorpay checkout
+  CASH // recorded at the desk
+  CARD_POS // card machine, recorded at the desk
+  DAY_PASS
+}
+
+enum PaymentStatus {
+  CREATED // razorpay order opened, not paid (or abandoned)
+  PAID
+  FAILED
+  REFUNDED // marked by admin after gateway refund
+}
+
+enum BookingStatus {
+  BOOKED
+  CANCELLED
+  CHECKED_IN
+  NO_SHOW
+}
+
+enum CancelSource {
+  NORMAL // inside the cutoff window
+  GRACE // past cutoff but used this month's freebie
+}
+
+enum PtStatus {
+  BOOKED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum SlotKind {
+  PUBLIC
+  PRIVATE_BREAK // trainer's own block — bookable by nobody, invisible to members
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum FoodSource {
+  MANUAL
+  OFF_SEARCH
+  OFF_BARCODE
+}
+
+enum Audience {
+  ALL
+  ACTIVE
+  EXPIRING // expires within 7 days
+  LAPSED // expired, not renewed
+}
+
+/* ================================ people ================================ */
+
+model User {
+  id        String        @id @default(cuid())
+  googleId  String        @unique
+  email     String        @unique
+  name      String
+  avatarUrl String?
+  role      Role          @default(MEMBER)
+  status    AccountStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  profile           Profile?
+  appState          AppState?
+  memberships       Membership[]
+  payments          Payment[]
+  bookings          Booking[]
+  waitlistEntries   WaitlistEntry[]
+  autoBookPatterns  AutoBookPattern[]
+  workoutLogs       WorkoutLog[]
+  nutritionEntries  NutritionEntry[]
+  hydrationLogs     HydrationLog[]
+  nutritionFavorites NutritionFavorite[]
+  enrollments       ProgramEnrollment[]
+  unlocks           ExerciseUnlock[]
+  ptBookings        PtBooking[]         @relation("memberPt")
+  trainerProfile    Trainer?
+  sessions          Session[]
+  pushSubs          PushSubscription[]
+}
+
+model Session {
+  id        String   @id // opaque high-entropy token; the cookie carries exactly this
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Profile {
+  userId             String        @id
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  heightCm           Float?
+  goal               Goal          @default(MAINTAIN)
+  activityLevel      ActivityLevel @default(MODERATE)
+  dailyCalorieTarget Int? // null → derived from BMR/TDEE when set elsewhere
+  proteinPct         Int           @default(30)
+  carbsPct           Int           @default(40)
+  fatPct             Int           @default(30)
+  experienced        Boolean       @default(false) // library gating default-open for veterans
+  injuryNotes        String? // red banner on the trainer's member view
+  updatedAt          DateTime      @updatedAt
+}
+
+enum Goal {
+  LOSE_FAT
+  MAINTAIN
+  BUILD_MUSCLE
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  HIGH
+  ATHLETE
+}
+
+/// Last-write-wins JSON blob: routines, weekly plan, day overrides, exWeights,
+/// bodyweight log, custom exercises, display settings. Mirrors the client's store.
+model AppState {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+/* ============================ money & plans ============================= */
+
+model Plan {
+  id           String       @id @default(cuid())
+  name         String
+  pricePaise   Int
+  durationDays Int
+  description  String?
+  isActive     Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+  payments     Payment[]    @relation("paymentPlan")
+}
+
+model Membership {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String?
+  plan          Plan?            @relation(fields: [planId], references: [id])
+  startDate     DateTime         @db.Date
+  endDate       DateTime         @db.Date
+  status        MembershipStatus @default(ACTIVE)
+  frozenUntil   DateTime?        @db.Date // freeze pauses expiry; frozen members cannot book
+  freezesUsed   Int              @default(0) // this membership-year
+  payments      Payment[]
+  createdAt     DateTime         @default(now())
+
+  @@index([userId, status])
+  @@index([endDate])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membershipId      String?
+  membership        Membership?   @relation(fields: [membershipId], references: [id])
+  planId            String?
+  plan              Plan?         @relation("paymentPlan", fields: [planId], references: [id])
+  amountPaise       Int
+  method            PaymentMethod
+  status            PaymentStatus @default(CREATED)
+  currency          String        @default("INR")
+  razorpayOrderId   String?       @unique
+  razorpayPaymentId String?       @unique
+  utr               String? // bank/UPI reference for manual reconciliation
+  note              String?
+  disputeNote       String? // admin log for "member claims they paid" cases
+  disputedAt        DateTime?
+  resolvedAt        DateTime?
+  recordedById      String? // staff/admin who recorded a CASH/CARD_POS payment
+  paidAt            DateTime?
+  createdAt         DateTime      @default(now())
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+model DayPassSale {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  amountPaise Int
+  date        DateTime @db.Date
+  code        String? // walk-in check-in token handed to the guest
+  checkedInAt DateTime?
+  recordedById String
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+}
+
+/* ============================== trainers =============================== */
+
+model Trainer {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio         String?
+  specialties String[]
+  bufferMin   Int      @default(10) // enforced gap after each PT session
+  availability AvailabilitySlot[]
+  ptBookings  PtBooking[] @relation("trainerPt")
+}
+
+model AvailabilitySlot {
+  id        String   @id @default(cuid())
+  trainerId String
+  trainer   Trainer  @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  weekday   Int // 0=Monday … 6=Sunday
+  startMin  Int
+  endMin    Int
+  kind      SlotKind @default(PUBLIC)
+  isActive  Boolean  @default(true)
+
+  @@index([trainerId, weekday])
+}
+
+model PtBooking {
+  id        String   @id @default(cuid())
+  memberId  String
+  member    User     @relation("memberPt", fields: [memberId], references: [id], onDelete: Cascade)
+  trainerId String
+  trainer   Trainer  @relation("trainerPt", fields: [trainerId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  startMin  Int
+  endMin    Int
+  status    PtStatus @default(BOOKED)
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@unique([trainerId, date, startMin])
+  @@index([memberId, date])
+}
+
+/* ============================ slot booking ============================= */
+
+model GymSlotTemplate {
+  id       String  @id @default(cuid())
+  name     String // "Morning", "Evening peak"…
+  weekday  Int // 0=Monday … 6=Sunday
+  startMin Int
+  endMin   Int
+  capacity Int
+  isActive Boolean @default(true)
+}
+
+model SlotInstance {
+  id        String   @id @default(cuid())
+  templateId String?
+  date      DateTime @db.Date
+  startMin  Int
+  endMin    Int
+  capacity  Int
+  bookings  Booking[]
+  waitlist  WaitlistEntry[]
+
+  @@unique([date, startMin, endMin])
+  @@index([date])
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  slotId        String
+  slot          SlotInstance  @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        BookingStatus @default(BOOKED)
+  source        BookingSrc    @default(APP)
+  cancelSource  CancelSource?
+  checkedInAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([slotId, userId])
+  @@index([userId, status])
+}
+
+enum BookingSrc {
+  APP
+  WALK_IN // created at check-in when there was no booking
+}
+
+model WaitlistEntry {
+  id       String       @id @default(cuid())
+  slotId   String
+  slot     SlotInstance @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position Int
+  active   Boolean      @default(true)
+  createdAt DateTime    @default(now())
+
+  @@unique([slotId, userId])
+  @@index([slotId, active])
+}
+
+model AutoBookPattern {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekday   Int
+  startMin  Int
+  endMin    Int
+  active    Boolean @default(true)
+
+  @@unique([userId, weekday])
+}
+
+/* ========================= programs & unlocks ========================== */
+
+model Program {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  level        String? // beginner / intermediate / advanced
+  isPublished  Boolean  @default(false)
+  createdById  String
+  createdAt    DateTime @default(now())
+  weeks        ProgramWeek[]
+  enrollments  ProgramEnrollment[]
+
+  @@index([createdById])
+}
+
+model ProgramWeek {
+  id        String       @id @default(cuid())
+  programId String
+  program   Program      @relation(fields: [programId], references: [id], onDelete: Cascade)
+  order     Int
+  days      ProgramDay[]
+
+  @@unique([programId, order])
+}
+
+model ProgramDay {
+  id        String            @id @default(cuid())
+  weekId    String
+  week      ProgramWeek       @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  order     Int
+  label     String // "Push A"
+  focusNote String?
+  exercises ProgramExercise[]
+  seq       Int // flat sequence number across the whole program — what unlocks step through
+
+  @@unique([weekId, order])
+}
+
+model ProgramExercise {
+  id        String     @id @default(cuid())
+  dayId     String
+  day       ProgramDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  exerciseId String
+  mode      String     @default("reps") // reps | time | cardio
+  sets      Int
+  reps      Int?
+  sec       Int?
+  min       Int?
+  speed     Float?
+  weightKg  Float?
+  bodyweight Boolean   @default(false)
+  perSide   Boolean    @default(false)
+  restSec   Int?
+  notes     String?
+  order     Int
+}
+
+model ProgramEnrollment {
+  id                 String   @id @default(cuid())
+  programId          String
+  program            Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  memberId           String
+  member             User     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  assignedById       String // the trainer who assigned — PT lead attribution
+  attributedTrainerId String? // settable if a different trainer should get credit
+  unlockedDays       Int      @default(1) // seq count unlocked so far
+  completedDays      Int      @default(0)
+  active             Boolean  @default(true)
+  startedAt          DateTime @default(now())
+
+  @@unique([programId, memberId])
+  @@index([memberId, active])
+}
+
+/// Library gating. Either an exerciseId (single unlock) or a bodypart (category unlock).
+model ExerciseUnlock {
+  id           String   @id @default(cuid())
+  memberId     String
+  member       User     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  exerciseId   String?
+  bodypart     String?
+  presetName   String? // audit hint: applied via which preset
+  unlockedById String
+  createdAt    DateTime @default(now())
+
+  @@index([memberId])
+}
+
+model UnlockPreset {
+  id          String   @id @default(cuid())
+  name        String // "Beginner set", "Rehab subset", "Full library"
+  content     Json // { exerciseIds?: [], bodyparts?: [], all?: bool }
+  createdById String
+  createdAt   DateTime @default(now())
+}
+
+/// The catalog mirror of the client's exercise dataset — only premium flags live here.
+model Exercise {
+  id        String  @id
+  name      String
+  bodypart  String
+  equipment String?
+  isPremium Boolean @default(false)
+
+  @@index([bodypart])
+}
+
+/* ============================== workouts =============================== */
+
+/// Finished sessions, written once at finish-workout time (client UUID = idempotency key).
+/// entries: [{ id(exerciseId), mode, sets:[{w,r,sec,min,speed,done,rir,rpe}], topW }]
+model WorkoutLog {
+  id          String   @id // client-generated UUID — duplicates are ignored server-side
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  startedAt   DateTime?
+  endedAt     DateTime?
+  routineName String?
+  totalVolume Float    @default(0)
+  prCount     Int      @default(0)
+  offSite     Boolean  @default(false) // trained outside a booked slot (vacation etc.)
+  entries     Json
+  deletedAt   DateTime?
+
+  @@index([userId, date])
+}
+
+/* ============================== nutrition ============================== */
+
+model NutritionEntry {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime  @db.Date
+  meal      MealType
+  name      String
+  servings  Float     @default(1)
+  kcal      Float
+  proteinG  Float     @default(0)
+  carbsG    Float     @default(0)
+  fatG      Float     @default(0)
+  source    FoodSource @default(MANUAL)
+  offId     String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, date])
+}
+
+model HydrationLog {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date   DateTime @db.Date
+  ml     Int      @default(0)
+
+  @@unique([userId, date])
+}
+
+model NutritionFavorite {
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+  meal     MealType
+  kcal     Float
+  proteinG Float
+  carbsG   Float
+  fatG     Float
+
+  @@index([userId])
+}
+
+/* =========================== notifications ============================= */
+
+model PushSubscription {
+  id        String   @id @default(cuid()) // endpoint hash
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  audience  Audience @default(ALL)
+  sentById  String
+  sentCount Int      @default(0)
+  sentAt    DateTime @default(now())
+}
+
+/* ============================== plumbing =============================== */
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String // 'user.approve', 'payment.refund.mark', 'settings.update'…
+  targetType String?
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Singleton row, id = 'main'. Everything the whole gym agrees on.
+model GymSettings {
+  id                  String  @id @default("main")
+  gymName             String  @default("openGym")
+  openMin             Int     @default(300)  // 05:00
+  closeMin            Int     @default(1380) // 23:00
+  bookingWindowDays   Int     @default(7)
+  cancelCutoffMin     Int     @default(120) // minutes before slot start
+  graceCancelPerMonth Int     @default(1)
+  freezeMaxDays       Int     @default(30)
+  freezeMaxPerYear    Int     @default(2)
+  dayPassPricePaise   Int     @default(30000) // ₹300
+  noShowStrikes       Int     @default(0) // 0 = track only (off); else N strikes → 7-day pause
+  vapidPublic         String?
+  vapidPrivate        String?
+}
