@@ -90,7 +90,7 @@ export default function Slots() {
             <BusyBtn busy={saveM.isPending} icon="check" size="sm" disabled={!dirty} onClick={save}>Save</BusyBtn>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3">
             {DAY_LABELS.map((label, wd) => {
               const daySlots = tpl.filter(t => t.weekday === wd).sort((a, b) => a.startMin - b.startMin)
               return (

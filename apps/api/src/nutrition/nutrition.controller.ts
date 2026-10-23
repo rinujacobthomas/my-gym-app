@@ -189,7 +189,7 @@ export class NutritionController {
     const male = s === 'm' || s === 'male'
     const female = s === 'f' || s === 'female'
     if (!male && !female) throw bad("sex must be 'm' or 'f'")
-    const mults: Record<string, number> = { sedentary: 1.2, light: 1.375, moderate: 1.55, high: 1.725, athlete: 1.9 }
+    const mults: Record<string, number> = { sedentary: 1.2, light: 1.375, moderate: 1.55, high: 1.725, active: 1.725, athlete: 1.9 }
     const actKey = String(activity ?? '').toLowerCase()
     if (!(actKey in mults)) throw bad('Invalid activity level')
     const g = String(goal ?? '').toLowerCase().replace(/[-\s]/g, '_')

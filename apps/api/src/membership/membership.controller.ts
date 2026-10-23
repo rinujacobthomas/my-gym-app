@@ -2,10 +2,11 @@ import { Controller, Get, Post, Body, Req, Res } from '@nestjs/common'
 import type { Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { PrismaService } from '../prisma.service.js'
-import { Prisma } from '../../generated/prisma/index.js'
+import { Prisma } from '#prisma'
 import { Public, Roles, CurrentUser, ReqUser, latestMembership, membershipStatus, startOfToday, bad } from '../common/guards.js'
 import { SettingsService, AuditService } from '../common/services.js'
 import { RazorpayService } from './razorpay.service.js'
+import { SlotsService } from '../scheduling/slots.service.js'
 
 const DAY_MS = 86400000
 const GRACE_DAYS = 3
@@ -14,7 +15,7 @@ const isoDate = (d?: Date | null) => (d ? new Date(d).toISOString().slice(0, 10)
 
 @Controller()
 export class MembershipController {
-  constructor(private db: PrismaService, private settings: SettingsService, private audit: AuditService) {}
+  constructor(private db: PrismaService, private settings: SettingsService, private audit: AuditService, private slots: SlotsService) {}
 
   @Public()
   @Get('plans')
@@ -57,7 +58,17 @@ export class MembershipController {
     const frozenUntil = new Date(startOfToday().getTime() + (days - 1) * DAY_MS)
     const endDate = new Date(new Date(m.endDate).getTime() + days * DAY_MS)
     await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil, endDate, freezesUsed: { increment: 1 } } })
-    this.audit.log(u.id, 'membership.freeze', 'Membership', m.id, { days, frozenUntil })
+    // Bookings inside the pause can't be used (the membership gate blocks check-in), so release
+    // the seats now instead of letting them turn into no-shows.
+    const held = await this.db.booking.findMany({
+      where: { userId: u.id, status: 'BOOKED', slot: { date: { gte: startOfToday(), lte: frozenUntil } } },
+      select: { id: true, slotId: true },
+    })
+    if (held.length) {
+      await this.db.booking.updateMany({ where: { id: { in: held.map(b => b.id) } }, data: { status: 'CANCELLED', cancelSource: 'NORMAL' } })
+      for (const b of held) await this.slots.promoteFromWaitlist(b.slotId)
+    }
+    this.audit.log(u.id, 'membership.freeze', 'Membership', m.id, { days, frozenUntil, bookingsReleased: held.length })
     const updated = await latestMembership(this.db, u.id)
     return membershipStatus(updated).info
   }
@@ -68,8 +79,9 @@ export class MembershipController {
     const m = await latestMembership(this.db, u.id)
     const today = startOfToday()
     if (!m || !m.frozenUntil || new Date(m.frozenUntil) < today) throw bad('No active freeze')
-    // Ending early hands back the frozen days that haven't happened yet (today counts as used).
-    const unused = Math.max(0, Math.round((new Date(m.frozenUntil).getTime() - today.getTime()) / DAY_MS))
+    // Ending early hands back the frozen days not used yet — today included, since the member
+    // can train again from the moment they unfreeze.
+    const unused = Math.max(0, Math.round((new Date(m.frozenUntil).getTime() - today.getTime()) / DAY_MS) + 1)
     const endDate = new Date(new Date(m.endDate).getTime() - unused * DAY_MS)
     await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil: null, endDate } })
     this.audit.log(u.id, 'membership.unfreeze', 'Membership', m.id, { frozenUntil: m.frozenUntil })

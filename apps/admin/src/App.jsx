@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { api, googleLogin, logout } from '@og/api-client'
 import Icon from '@og/ui'
-import { getSessionUser, setSessionUser, useSessionUser } from './lib/session.js'
+import { setSessionUser, useSessionUser } from './lib/session.js'
 import { ToastHost } from './components/bits.jsx'
 import Overview from './views/Overview.jsx'
 import Approvals from './views/Approvals.jsx'
@@ -31,7 +31,8 @@ export default function App() {
 
   // Ask the API who we are on first paint — a valid cookie restores the session.
   useEffect(() => {
-    if (getSessionUser()) return
+    // Always re-check, even with a cached user: role, approval and disabled status can change
+    // server-side, and the cache only exists so the shell paints instantly.
     api('/api/me').then(r => {
       if (r.user.status === 'ACTIVE' && ['ADMIN'].includes(r.user.role)) setSessionUser(r.user)
       else if (r.user.status === 'ACTIVE') setSessionUser({ ...r.user, wrongApp: true })

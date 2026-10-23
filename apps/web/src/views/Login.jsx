@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useStore } from '../store/useStore.js'
 import { googleLogin } from '../lib/api.js'
 import { t } from '../lib/i18n.js'
@@ -5,12 +6,14 @@ import Icon from '../components/Icon.jsx'
 
 // Google-only sign-in. The OAuth round-trip happens in a full-page redirect to the API
 // (/api/auth/google), which bounces back to `next` with the session cookie set.
+// Shared by the login screen and the account walls below.
+const head = <>
+  <div className="text-[54px] flex justify-center text-acc"><Icon name="dumbbell" /></div>
+  <h1 className="text-[34px] font-bold tracking-[-.028em] mt-2.5 mb-1">openGym</h1>
+</>
+const wrap = 'max-w-[560px] mx-auto flex flex-col justify-center min-h-[78vh] text-center px-6'
+
 export default function Login() {
-  const head = <>
-    <div className="text-[54px] flex justify-center text-acc"><Icon name="dumbbell" /></div>
-    <h1 className="text-[34px] font-bold tracking-[-.028em] mt-2.5 mb-1">openGym</h1>
-  </>
-  const wrap = 'max-w-[560px] mx-auto flex flex-col justify-center min-h-[78vh] text-center px-6'
 
   return (
     <div className={wrap}>
@@ -42,6 +45,16 @@ function GoogleG() {
 // Full-screen states for accounts that exist but may not use the app yet.
 export function AccountWall({ user }) {
   const pending = user.status === 'PENDING'
+  const boot = useStore(s => s.boot)
+  // Re-ask the server every 20s (and when the app comes back to the foreground) so the
+  // screen really does unlock on its own once the front desk approves the account.
+  useEffect(() => {
+    if (!pending) return
+    const check = () => { if (document.visibilityState === 'visible') boot() }
+    const id = setInterval(check, 20000)
+    document.addEventListener('visibilitychange', check)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', check) }
+  }, [pending, boot])
   return (
     <div className={wrap}>
       {head}
@@ -58,26 +71,6 @@ export function AccountWall({ user }) {
             : t('This account has been deactivated by the gym. Contact the front desk if you think this is a mistake.')}
         </p>
         <p className="text-label-3 text-[13px] mt-3">{user.email}</p>
-        <SignOutLink />
-      </div>
-    </div>
-  )
-}
-
-export function RenewWall({ membership }) {
-  return (
-    <div className={wrap}>
-      {head}
-      <div className="bg-surface rounded-[16px] p-5 mt-6 max-w-[420px] mx-auto w-full">
-        <div className="text-[40px] mb-2 text-label-3"><Icon name="hourglass" /></div>
-        <h2 className="text-[20px] font-semibold tracking-[-.02em]">{t('Membership expired')}</h2>
-        <p className="text-label-2 text-[14px] leading-[1.45] mt-1.5">
-          {t('Renew to book slots and log new workouts. Your history and stats stay right here, untouched.')}
-        </p>
-        {membership && <p className="text-label-3 text-[13px] mt-3">
-          {t('Expired {0}', membership.endDate)}
-        </p>}
-        <a href="/membership" className="block bg-acc text-white rounded-xl py-[13px] mt-4 font-semibold no-underline">{t('Renew membership')}</a>
         <SignOutLink />
       </div>
     </div>

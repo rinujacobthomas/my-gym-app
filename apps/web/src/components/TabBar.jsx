@@ -5,14 +5,15 @@ import { startWorkout } from '../lib/startWorkout.js'
 import { t } from '../lib/i18n.js'
 import Icon from './Icon.jsx'
 
+// Gym things first (what members come to the app for at the door), then training tools.
 const MORE = [
-  { icon: 'calendar', to: '/plan', label: 'My Plan', tint: 'var(--blue)' },
-  { icon: 'chart', to: '/stats', label: 'Stats', tint: 'var(--indigo)' },
-  { icon: 'list', to: '/library', label: 'Exercises', tint: 'var(--mint)' },
-  { icon: 'history', to: '/history', label: 'History', tint: 'var(--purple)' },
+  { icon: 'crown', to: '/membership', label: 'Membership', tint: 'var(--yellow)' },
   { icon: 'clipboard', to: '/programs', label: 'Programs', tint: 'var(--teal)' },
   { icon: 'personCircle', to: '/trainers', label: 'Coaches', tint: 'var(--orange)' },
-  { icon: 'crown', to: '/membership', label: 'Membership', tint: 'var(--yellow)' },
+  { icon: 'calendar', to: '/plan', label: 'My Plan', tint: 'var(--blue)' },
+  { icon: 'chart', to: '/stats', label: 'Stats', tint: 'var(--indigo)' },
+  { icon: 'history', to: '/history', label: 'History', tint: 'var(--purple)' },
+  { icon: 'list', to: '/library', label: 'Exercises', tint: 'var(--mint)' },
   { icon: 'gear', to: '/settings', label: 'Settings', tint: 'var(--grey)' },
 ]
 

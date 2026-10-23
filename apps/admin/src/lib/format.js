@@ -15,7 +15,8 @@ export const minFromHHMM = s => {
 
 export const fmtDate = ts => {
   if (!ts) return '—'
-  const d = new Date(ts)
+  // @db.Date columns arrive as midnight UTC; read them as that calendar day, not as an instant.
+  const d = /^\d{4}-\d{2}-\d{2}(T00:00:00(\.000)?Z)?$/.test(String(ts)) ? new Date(String(ts).slice(0, 10) + 'T12:00:00') : new Date(ts)
   if (isNaN(+d)) return '—'
   return d.getDate() + ' ' + MON[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
 }

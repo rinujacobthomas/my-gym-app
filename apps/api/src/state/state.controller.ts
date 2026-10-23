@@ -5,7 +5,6 @@ import { PrismaService } from '../prisma.service.js'
 /// The legacy-style blob: routines, week plan, settings, bodyweight. Last-write-wins with a
 /// client-side dirty flag; `active` (in-progress workout) is device-local and stripped here.
 @Controller('state')
-@UseGuards(MembershipGuard)
 export class StateController {
   constructor(private db: PrismaService) {}
 
@@ -15,7 +14,9 @@ export class StateController {
     return { state: row?.data ?? null }
   }
 
+  // Reading your own plan stays open after a membership lapses; saving needs an active one.
   @Put()
+  @UseGuards(MembershipGuard)
   async put(@CurrentUser() u: ReqUser, @Body() body: { state?: any }) {
     if (!body.state || typeof body.state !== 'object') return { ok: false }
     const state = { ...body.state }

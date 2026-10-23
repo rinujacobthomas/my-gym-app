@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, listPrograms, updateProgram, enrollProgram, ptBookings, qk } from '@og/api-client'
+import { api, listPrograms, updateProgram, enrollProgram, ptBookings, searchMembers, qk } from '@og/api-client'
 import Icon from '@og/ui'
-import { Check, Button } from '@og/ui'
+import { Check, Button, SearchField } from '@og/ui'
 import { PageHead, Empty, SkelList, BusyBtn, Modal, ConfirmModal, toast, errText } from '../components/bits.jsx'
 
 export default function Programs() {
@@ -123,14 +123,21 @@ function ProgramCard({ p, onAssign, onPublish, onDelete, busy }) {
 function AssignSheet({ program, onClose }) {
   const qc = useQueryClient()
   const [sel, setSel] = useState(new Set())
+  const [q, setQ] = useState('')
+  const [dq, setDq] = useState('')
+  useEffect(() => { const tm = setTimeout(() => setDq(q.trim()), 300); return () => clearTimeout(tm) }, [q])
 
   const clientsQ = useQuery({ queryKey: qk.ptBookings, queryFn: ptBookings })
+  const searchQ = useQuery({ queryKey: ['staff', 'members', dq], queryFn: () => searchMembers(dq), enabled: dq.length >= 2 })
+  const searching = dq.length >= 2
 
   const clients = useMemo(() => {
     const m = new Map()
     for (const b of clientsQ.data || []) if (!m.has(b.member.id)) m.set(b.member.id, b.member)
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [clientsQ.data])
+  // PT clients by default; any active member once the coach types a name or email.
+  const list = searching ? searchQ.data || [] : clients
 
   const enrollMut = useMutation({
     mutationFn: ids => enrollProgram(program.id, ids),
@@ -157,18 +164,23 @@ function AssignSheet({ program, onClose }) {
           {'Enroll ' + (sel.size || '') + (sel.size === 1 ? ' member' : sel.size > 1 ? ' members' : '')}
         </BusyBtn>
       }>
-      {clientsQ.isPending ? (
+      <div className="mb-3">
+        <SearchField value={q} onChange={e => setQ(e.target.value)} onClear={() => setQ('')} placeholder="Search any member" />
+      </div>
+      {(searching ? searchQ.isPending : clientsQ.isPending) ? (
         <SkelList n={3} h={46} />
-      ) : clients.length === 0 ? (
-        <Empty icon="person" title="No PT clients found" hint="Members must have at least one PT session with you to appear here." />
+      ) : list.length === 0 ? (
+        searching
+          ? <Empty icon="magnifier" title={'No member matches “' + dq + '”'} />
+          : <Empty icon="person" title="No PT clients yet" hint="Search above to find any member of the gym." />
       ) : (
         <div className="bg-surface rounded-[14px] overflow-hidden max-h-[46vh] overflow-y-auto">
-          {clients.map(m => (
-            <button key={m.id} onClick={() => toggle(m.id)}
-              className="lrow relative w-full flex items-center gap-3 text-left px-3.5 py-[10px] bg-transparent border-0 no-tap active:bg-surface-2 transition-colors duration-150">
+          {list.map(m => (
+            <label key={m.id}
+              className="lrow relative w-full flex items-center gap-3 text-left px-3.5 py-[10px] cursor-pointer no-tap active:bg-surface-2 transition-colors duration-150">
               <span className="flex-1 min-w-0 text-[16px] tracking-[-.012em] truncate">{m.name}</span>
               <Check checked={sel.has(m.id)} onChange={() => toggle(m.id)} />
-            </button>
+            </label>
           ))}
         </div>
       )}

@@ -12,8 +12,18 @@ export const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
+// Calendar-day value from whatever the caller has: 'YYYY-MM-DD', a Prisma @db.Date
+// ('YYYY-MM-DDT00:00:00.000Z' — the day itself, not midnight UTC), a timestamp or a Date.
+export function dayOf(v) {
+  if (v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate(), 12)
+  const s = String(v ?? '')
+  if (/^\d{4}-\d{2}-\d{2}(T00:00:00(\.000)?Z)?$/.test(s)) return new Date(s.slice(0, 10) + 'T12:00:00')
+  return dayOf(new Date(s))
+}
+
 export function fmtDate(iso, long) {
-  const d = new Date(iso + 'T12:00:00')
+  const d = dayOf(iso)
+  if (isNaN(d)) return '—'
   return d.toLocaleDateString(dateLocale(), long ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' })
 }
 export function fmtDur(ms) {

@@ -252,7 +252,11 @@ export class SchedulingController {
     const today = startOfToday()
     const todayISO = today.toISOString().slice(0, 10)
     const candidates = await this.db.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })
+    // Codes roll over at UTC midnight but phones refresh at local midnight, so a code shown
+    // in the early morning can still be yesterday's (UTC) — accept both.
+    const yesterdayISO = new Date(today.getTime() - 86400000).toISOString().slice(0, 10)
     const ownerId = this.auth.parseCheckInCode(code, secret, candidates, todayISO)
+      ?? this.auth.parseCheckInCode(code, secret, candidates, yesterdayISO)
     if (!ownerId) throw bad('Invalid code', 404)
     const owner = await this.db.user.findUnique({ where: { id: ownerId } })
     if (!owner || owner.status !== 'ACTIVE') throw bad('Member account not active', 403)

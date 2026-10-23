@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma.service.js'
-import { Prisma } from '../../generated/prisma/index.js'
+import { Prisma } from '#prisma'
 import { startOfToday } from '../common/guards.js'
 import { SettingsService } from '../common/services.js'
 

@@ -32,6 +32,17 @@ export default function Approvals() {
     onError: e => toast(errText(e)),
   })
   const approve = ids => { if (ids.length) approveM.mutate(ids) }
+  // Declining disables the account: it leaves the queue and that Google login can't get in.
+  // It can be re-enabled later from Members.
+  const declineM = useMutation({
+    mutationFn: id => api('/api/admin/users/disable', { method: 'POST', body: JSON.stringify({ id, disabled: true }) }),
+    onSuccess: () => {
+      toast('Request declined')
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'overview'] })
+    },
+    onError: e => toast(errText(e)),
+  })
   const rowBusy = id => approveM.isPending && approveM.variables?.length === 1 && approveM.variables[0] === id
 
   const rows = data?.rows || []
@@ -87,7 +98,11 @@ export default function Approvals() {
                     <div className="text-[12.5px] text-label-2 truncate">{u.email}</div>
                   </button>
                   <span className="hidden desk:block text-[12px] text-label-3 shrink-0">{fmtDate(u.createdAt)}</span>
-                  <BusyBtn busy={rowBusy(u.id)} icon="check" size="xs" variant="tinted" onClick={() => approve([u.id])}>
+                  <BusyBtn busy={declineM.isPending && declineM.variables === u.id} size="xs" variant="ghost" className="text-red whitespace-nowrap"
+                    onClick={() => { if (window.confirm('Decline ' + u.name + '? They will not be able to sign in. You can re-enable them later under Members.')) declineM.mutate(u.id) }}>
+                    Decline
+                  </BusyBtn>
+                  <BusyBtn busy={rowBusy(u.id)} icon="check" size="xs" variant="tinted" className="whitespace-nowrap" onClick={() => approve([u.id])}>
                     Approve
                   </BusyBtn>
                 </div>

@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
-import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { api, googleLogin, logout } from '@og/api-client'
 import Icon from '@og/ui'
-import { getSessionUser, setSessionUser, useSessionUser } from './lib/session.js'
+import { setSessionUser, useSessionUser } from './lib/session.js'
 import { ToastHost } from './components/bits.jsx'
 import Today from './views/Today.jsx'
 import Scan from './views/Scan.jsx'
@@ -19,6 +19,8 @@ const NAV = [
   { to: '/programs', icon: 'list', label: 'Programs' },
   { to: '/availability', icon: 'clock', label: 'My hours' },
 ]
+// Reception (STAFF) runs the door: attendance and check-in. Coaching screens need TRAINER.
+const STAFF_NAV = ['/today', '/scan']
 
 export default function App() {
   const user = useSessionUser()
@@ -26,7 +28,8 @@ export default function App() {
   useEffect(() => { window.scrollTo(0, 0) }, [loc.pathname])
 
   useEffect(() => {
-    if (getSessionUser()) return
+    // Always re-check, even with a cached user: role, approval and disabled status can change
+    // server-side, and the cache only exists so the shell paints instantly.
     api('/api/me').then(r => {
       if (r.user.status === 'ACTIVE' && ['TRAINER', 'ADMIN', 'STAFF'].includes(r.user.role)) setSessionUser(r.user)
       else if (r.user.status === 'ACTIVE') setSessionUser({ ...r.user, wrongApp: true })
@@ -80,6 +83,7 @@ function CoachShell({ user }) {
   const loc = useLocation()
   const nav = useNavigate()
   const signOut = () => logout().finally(() => setSessionUser(null))
+  const nav_ = user.role === 'STAFF' ? NAV.filter(n => STAFF_NAV.includes(n.to)) : NAV
 
   const sideCls = act => 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-[15px] font-medium transition-colors no-tap ' + (act ? 'bg-acc-soft text-acc' : 'text-label-2 hover:bg-surface')
   const botCls = act => 'flex-1 flex flex-col items-center gap-[2px] py-1 no-tap ' + (act ? 'text-acc' : 'text-label-3')
@@ -102,7 +106,7 @@ function CoachShell({ user }) {
             <div className="text-[11px] text-label-3">Coach console</div>
           </div>
         </div>
-        {NAV.map(n => <NavBtn key={n.to} side {...n} />)}
+        {nav_.map(n => <NavBtn key={n.to} side {...n} />)}
         <div className="mt-auto px-2 pb-1 text-[13px] text-label-2 truncate">{user.name}</div>
         <button onClick={signOut} className="mx-1 mb-1 text-left px-3 py-2 rounded-xl text-[14px] text-red hover:bg-surface">Sign out</button>
       </aside>
@@ -122,7 +126,7 @@ function CoachShell({ user }) {
       </main>
 
       <nav className="desk:hidden fixed bottom-0 inset-x-0 z-50 flex bg-[color-mix(in_srgb,var(--bg-el)_88%,transparent)] backdrop-blur-xl border-t-[0.5px] border-sep-op pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom,0px))]">
-        {NAV.slice(0, 5).map(n => <NavBtn key={n.to} {...n} />)}
+        {nav_.slice(0, 5).map(n => <NavBtn key={n.to} {...n} />)}
       </nav>
     </div>
   )

@@ -8,27 +8,44 @@ import { t } from '../lib/i18n.js'
 import { confirmSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
 
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const AV_COLORS = ['var(--blue)', 'var(--teal)', 'var(--purple)', 'var(--pink)', 'var(--orange)', 'var(--mint)', 'var(--indigo)']
 
 const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
 const avColor = name => AV_COLORS[((name || '?').charCodeAt(0) || 0) % AV_COLORS.length]
 
-const nextDateFor = wd => {
-  const d = new Date()
-  d.setDate(d.getDate() + ((wd - d.getDay() + 7) % 7))
-  return isoOf(d)
+const SESSION_MIN = 60
+
+// Bookable sessions for the next 7 days: each public window cut into 1-hour sessions,
+// minus anything already taken (plus the coach's buffer) and anything starting too soon.
+// Availability weekdays come from the API as Mon=0 … Sun=6.
+function freeSessions(tr) {
+  const out = []
+  const now = new Date()
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const buf = tr.bufferMin || 0
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now); d.setDate(now.getDate() + i)
+    const iso = isoOf(d)
+    const srvWd = (d.getDay() + 6) % 7
+    const taken = (tr.booked || []).filter(b => b.date === iso)
+    const slots = []
+    for (const w of (tr.availability || []).filter(a => a.weekday === srvWd)) {
+      const len = Math.min(SESSION_MIN, w.endMin - w.startMin)
+      // step by session + buffer so back-to-back times shown can all be booked
+      for (let st = w.startMin; st + len <= w.endMin; st += SESSION_MIN + buf) {
+        const en = st + len
+        if (i === 0 && st < nowMin + 30) continue
+        if (taken.some(b => st < b.endMin + buf && b.startMin < en + buf)) continue
+        slots.push({ startMin: st, endMin: en })
+      }
+    }
+    if (slots.length) out.push({ iso, slots })
+  }
+  return out
 }
 
 function TrainerCard({ tr, open, onToggle, onBook }) {
-  const byWd = new Map()
-  ;(tr.availability || []).forEach(w => {
-    if (!byWd.has(w.weekday)) byWd.set(w.weekday, [])
-    byWd.get(w.weekday).push(w)
-  })
-  ;[...byWd.values()].forEach(list => list.sort((a, b) => a.startMin - b.startMin))
-  const any = [...byWd.values()].some(l => l.length)
+  const days = tr.id ? freeSessions(tr) : []
 
   return <div className="bg-surface rounded-[14px] p-4 mb-3 min-w-0">
     <button className="w-full flex items-center gap-3 text-left no-tap" onClick={onToggle}>
@@ -37,9 +54,11 @@ function TrainerCard({ tr, open, onToggle, onBook }) {
       </span>
       <span className="flex-1 min-w-0">
         <span className="block text-[18px] font-semibold tracking-[-.012em] leading-[1.2] truncate">{tr.name}</span>
-        {!!tr.bufferMin && <span className="block text-label-3 text-[13px] leading-[1.3] mt-0.5">{t('{0} min buffer between sessions', tr.bufferMin)}</span>}
+        <span className="block text-label-3 text-[13px] leading-[1.3] mt-0.5">
+          {days.length ? t('{0} free sessions this week', days.reduce((n, d) => n + d.slots.length, 0)) : t('No free sessions this week')}
+        </span>
       </span>
-      <Icon name={open ? 'chevronUp' : 'chevronDown'} className="text-label-3 text-[16px] shrink-0" />
+      <span className="text-acc text-[14px] font-semibold shrink-0">{open ? t('Hide') : t('See times')}</span>
     </button>
 
     {tr.bio && <div className="text-label-2 text-[13px] leading-[1.38] mt-2">{tr.bio}</div>}
@@ -50,22 +69,19 @@ function TrainerCard({ tr, open, onToggle, onBook }) {
       </div>
     )}
 
-    {open && (any
-      ? WEEK_ORDER.filter(wd => (byWd.get(wd) || []).length).map(wd => {
-        const date = nextDateFor(wd)
-        return <div key={wd} className="mt-3 first:mt-3">
-          <div className="text-[13px] text-label-2 mb-1.5">{WD[wd]} <span className="text-label-3">· {fmtDate(date, true)}</span></div>
+    {open && (days.length
+      ? days.map(d => <div key={d.iso} className="mt-3">
+          <div className="text-[13px] text-label-2 mb-1.5">{d.iso === isoOf(new Date()) ? t('Today') : fmtDate(d.iso, true)}</div>
           <div className="flex flex-wrap gap-1.5">
-            {(byWd.get(wd) || []).map((w, i) => (
-              <button key={i} onClick={() => onBook(tr, w)}
+            {d.slots.map(w => (
+              <button key={w.startMin} onClick={() => onBook(tr, d.iso, w)}
                 className="px-3 py-[6px] rounded-lg text-[14px] font-medium bg-acc-soft text-acc transition-transform duration-150 active:scale-95 no-tap">
-                {hhmm(w.startMin)} – {hhmm(w.endMin)}
+                {hhmm(w.startMin)}
               </button>
             ))}
           </div>
-        </div>
-      })
-      : <div className="text-label-3 text-[13px] leading-[1.38] mt-3">{t('No public hours right now — message the desk to arrange a session.')}</div>)}
+        </div>)
+      : <div className="text-label-3 text-[13px] leading-[1.38] mt-3">{t('No free sessions in the next 7 days — ask at the front desk to arrange one.')}</div>)}
   </div>
 }
 
@@ -79,10 +95,9 @@ export default function Trainers() {
   const [busyId, setBusyId] = useState(null)
 
   const trainers = trainersQ.data || []
-  const nameOf = id => { const tr = trainers.find(x => x.id === id); return tr ? tr.name : t('Trainer') }
+  const nameOf = b => (b.trainer && b.trainer.name) || t('Trainer')
 
-  const bookWindow = (tr, win) => {
-    const date = nextDateFor(win.weekday)
+  const bookWindow = (tr, date, win) => {
     confirmSheet({
       title: t('Book {0}?', tr.name),
       message: t('{0} · {1} – {2}', fmtDate(date, true), hhmm(win.startMin), hhmm(win.endMin)),
@@ -92,6 +107,7 @@ export default function Trainers() {
           await api('/api/pt/bookings', { method: 'POST', body: JSON.stringify({ trainerId: tr.id, date, startMin: win.startMin, endMin: win.endMin }) })
           toast(t('Session booked 💪'))
           qc.invalidateQueries({ queryKey: qk.ptBookings })
+          qc.invalidateQueries({ queryKey: qk.trainers })
         } catch (e) {
           toast(e.status === 409 ? t('Time just got taken') : t('Could not book: {0}', e.message))
         }
@@ -101,26 +117,26 @@ export default function Trainers() {
 
   const cancelSession = b => confirmSheet({
     title: t('Cancel this session?'),
-    message: t('{0} · {1} · {2} – {3}', nameOf(b.trainerId), fmtDate(b.date, true), hhmm(b.startMin), hhmm(b.endMin)),
+    message: t('{0} · {1} · {2} – {3}', nameOf(b), fmtDate(b.date, true), hhmm(b.startMin), hhmm(b.endMin)),
     confirmText: t('Cancel session'), danger: true,
     onConfirm: async () => {
       if (busyId === b.id) return
       setBusyId(b.id)
-      try { await api('/api/pt/' + b.id + '/cancel', { method: 'POST' }); toast(t('Session cancelled')); qc.invalidateQueries({ queryKey: qk.ptBookings }) }
+      try { await api('/api/pt/' + b.id + '/cancel', { method: 'POST' }); toast(t('Session cancelled')); qc.invalidateQueries({ queryKey: qk.ptBookings }); qc.invalidateQueries({ queryKey: qk.trainers }) }
       catch (e) { toast(t('Could not cancel: {0}', e.message)) }
       finally { setBusyId(null) }
     },
   })
 
-  const sessions = (ptQ.data || []).slice().sort((a, b) =>
-    (b.date + hhmm(b.startMin)).localeCompare(a.date + hhmm(a.startMin)))
+  // The API returns upcoming sessions first (soonest first), then past ones (latest first).
+  const sessions = (ptQ.data || []).slice(0, 20)
 
   return <div>
     <div className="flex items-end gap-3 mt-2 mb-[18px]">
       <button className="w-9 h-9 rounded-full shrink-0 bg-surface text-label flex items-center justify-center text-[18px] transition-[background-color,transform] duration-150 active:bg-surface-2 active:scale-90 no-tap" onClick={() => nav(-1)} aria-label={t('Back')}><Icon name="chevronLeft" /></button>
       <div className="flex-1 ml-2.5">
-        <h1 className="text-[34px] leading-[1.06] font-bold tracking-[-.028em]">{t('Trainers')}</h1>
-        <div className="text-label-2 text-[15px] tracking-[-.006em] mt-1">{t('Book a personal session')}</div>
+        <h1 className="text-[34px] leading-[1.06] font-bold tracking-[-.028em]">{t('Coaches')}</h1>
+        <div className="text-label-2 text-[15px] tracking-[-.006em] mt-1">{t('Book a 1-on-1 training session')}</div>
       </div>
     </div>
 
@@ -150,25 +166,27 @@ export default function Trainers() {
         ))}
       </div>}
 
-    <h2 className="block text-[13px] font-normal text-label-2 tracking-[-.004em] px-1 pb-[7px] mt-6">{t('My PT sessions')}</h2>
+    <h2 className="block text-[13px] font-normal text-label-2 tracking-[-.004em] px-1 pb-[7px] mt-6">{t('My 1-on-1 sessions')}</h2>
     <div className="bg-surface rounded-[14px] overflow-hidden mb-3">
       {sessions.length ? sessions.map(b => {
-        const cancelled = String(b.status || '').toUpperCase() === 'CANCELLED'
+        const status = String(b.status || '').toUpperCase()
+        const cancelled = status === 'CANCELLED'
+        const upcoming = status === 'BOOKED' && String(b.date).slice(0, 10) >= isoOf(new Date())
         return <div key={b.id} className={'lrow relative flex items-center gap-3 px-3.5 py-[11px] min-h-[56px]' + (cancelled ? ' opacity-50' : '')}>
-          <span className="w-[29px] h-[29px] rounded-[7px] shrink-0 text-[17px] flex items-center justify-center text-white" style={{ background: avColor(nameOf(b.trainerId)) }}>
+          <span className="w-[29px] h-[29px] rounded-[7px] shrink-0 text-[17px] flex items-center justify-center text-white" style={{ background: avColor(nameOf(b)) }}>
             <Icon name="dumbbell" />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="text-[17px] tracking-[-.012em] leading-[1.25] truncate">{nameOf(b.trainerId)}</div>
+            <div className="text-[17px] tracking-[-.012em] leading-[1.25] truncate">{nameOf(b)}</div>
             <div className="text-label-2 text-[13px] leading-[1.3] mt-px">{fmtDate(b.date, true)} · {hhmm(b.startMin)} – {hhmm(b.endMin)}</div>
           </div>
-          {cancelled
-            ? <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium shrink-0 bg-surface-2 text-label-3">{t('Cancelled')}</span>
+          {!upcoming
+            ? <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium shrink-0 bg-surface-2 text-label-3">{t(cancelled ? 'Cancelled' : status === 'COMPLETED' ? 'Done' : status === 'NO_SHOW' ? 'Missed' : 'Past')}</span>
             : <button className="shrink-0 px-3 py-[5px] rounded-lg text-[14px] text-red bg-[color-mix(in_srgb,var(--red)_15%,transparent)] no-tap active:opacity-50 disabled:opacity-30" disabled={busyId === b.id} onClick={() => cancelSession(b)}>{busyId === b.id ? t('…') : t('Cancel')}</button>}
         </div>
       }) : <div className="px-3.5 py-5 text-center">
         <Icon name="calendar" className="text-[24px] text-label-3 mx-auto" />
-        <div className="text-label-2 text-[13px] leading-[1.38] mt-1.5">{ptQ.isPending ? t('Loading…') : t('No sessions yet — tap a free window above to book one.')}</div>
+        <div className="text-label-2 text-[13px] leading-[1.38] mt-1.5">{ptQ.isPending ? t('Loading…') : t('No sessions yet — open a coach above and tap a time to book.')}</div>
       </div>}
     </div>
 
