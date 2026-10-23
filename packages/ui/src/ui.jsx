@@ -243,7 +243,7 @@ export function Section({ title, footer, children, className = '' }) {
 export function Row({ icon, iconTint, title, subtitle, value, accessory = 'none', onClick, danger, children, className = '' }) {
   const Tag = onClick ? 'button' : 'div'
   return (
-    <Tag className={'lrow relative flex items-center gap-3 w-full text-left px-3.5 py-[11px] min-h-[46px] text-label bg-transparent no-tap ' + (onClick ? 'active:bg-surface-2 ' : '') + (danger ? 'text-red ' : '') + className}>
+    <Tag onClick={onClick} className={'lrow relative flex items-center gap-3 w-full text-left px-3.5 py-[11px] min-h-[46px] text-label bg-transparent no-tap ' + (onClick ? 'active:bg-surface-2 ' : '') + (danger ? 'text-red ' : '') + className}>
       {icon && <span className="w-[29px] h-[29px] rounded-[7px] shrink-0 text-[18px] flex items-center justify-center text-white bg-[var(--tint,var(--acc))]" style={iconTint ? { '--tint': iconTint } : null}><Icon name={icon} /></span>}
       <span className="flex-1 min-w-0 flex flex-col gap-px">
         <span className="text-[17px] tracking-[-.012em] leading-[1.25]">{title}</span>
@@ -319,7 +319,8 @@ export function Button({ variant = 'plain', size, icon, trailingIcon, children, 
   return (
     <button className={`${base} ${look} ${className}`} {...rest}>
       {icon && <Icon name={icon} className={icnSize} />}
-      {children && <span>{children}</span>}
+      {/* inline-flex: callers like BusyBtn put their own icon inside children */}
+      {children && <span className="inline-flex items-center gap-[inherit] min-w-0">{children}</span>}
       {trailingIcon && <Icon name={trailingIcon} className={icnSize} />}
     </button>
   )

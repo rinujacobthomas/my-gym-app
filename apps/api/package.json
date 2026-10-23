@@ -2,13 +2,22 @@
   "name": "@og/api",
   "private": true,
   "version": "2.0.0",
-  "description": "openGym platform API — NestJS + Prisma + PostgreSQL",
+  "description": "openGym platform API \u2014 NestJS + Prisma + PostgreSQL",
   "license": "AGPL-3.0-or-later",
+  "imports": {
+    "#prisma": "./generated/prisma/index.js"
+  },
+  "files": [
+    "dist",
+    "generated",
+    "prisma",
+    "scripts"
+  ],
   "scripts": {
     "dev": "nest start --watch",
     "build": "prisma generate && nest build",
     "start": "node dist/apps/api/src/main.js",
-    "test": "echo no unit tests yet",
+    "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
@@ -21,6 +30,7 @@
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/schedule": "^6.0.1",
     "@prisma/client": "^6.19.0",
+    "express": "^5.2.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "web-push": "^3.6.7"
@@ -32,6 +42,7 @@
     "@types/web-push": "^3.6.4",
     "prisma": "^6.19.0",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

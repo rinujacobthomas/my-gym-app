@@ -2,7 +2,7 @@ import { Controller, Get, Post, Req, Res, Query, UseGuards, UnauthorizedExceptio
 import { Request, Response } from 'express'
 import { AuthService } from './auth.service.js'
 import { PrismaService } from '../prisma.service.js'
-import { Public, CurrentUser, ReqUser, parseCookie, latestMembership, membershipStatus } from '../common/guards.js'
+import { Public, AllowPending, CurrentUser, ReqUser, parseCookie, latestMembership, membershipStatus } from '../common/guards.js'
 import { SettingsService } from '../common/services.js'
 
 const COOKIE = 'og_session'
@@ -35,6 +35,7 @@ export class AuthController {
     }
   }
 
+  @AllowPending()
   @Post('logout')
   async logout(@Req() req: Request, @Res() res: Response) {
     await this.auth.logout(parseCookie(req.headers.cookie || '', COOKIE) ?? undefined)
@@ -42,6 +43,7 @@ export class AuthController {
     res.json({ ok: true })
   }
 
+  @AllowPending()
   @Post('logout-all')
   async logoutAll(@Req() req: any, @Res() res: Response) {
     await this.auth.logoutAll(req.user.id)
@@ -51,6 +53,7 @@ export class AuthController {
 }
 
 @Controller('me')
+@AllowPending()
 export class MeController {
   constructor(private db: PrismaService, private settings: SettingsService) {}
 

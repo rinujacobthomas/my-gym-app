@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common'
-import { Prisma } from '../../generated/prisma/index.js'
+import { Prisma } from '#prisma'
 import { PrismaService } from '../prisma.service.js'
 import { CurrentUser, ReqUser, Roles, bad } from '../common/guards.js'
 import { AuditService } from '../common/services.js'
@@ -202,6 +202,20 @@ export class ProgramsController {
     const updated = await this.db.programEnrollment.update({ where: { id }, data: { unlockedDays: 1 } })
     this.audit.log(u.id, 'enrollment.reset', 'ProgramEnrollment', id)
     return updated
+  }
+
+  /** The member finished program day `seq` — progress moves forward, never past what's unlocked. */
+  @Post('enrollments/:id/complete')
+  @Roles('MEMBER')
+  async completeDay(@CurrentUser() u: ReqUser, @Param('id') id: string, @Body() body: any) {
+    const e = await this.db.programEnrollment.findUnique({ where: { id } })
+    if (!e || e.memberId !== u.id) throw bad('Enrollment not found', 404)
+    const seq = Number(body?.seq)
+    if (!Number.isInteger(seq) || seq < 1) throw bad('seq must be a positive integer')
+    if (seq > e.unlockedDays) throw bad('That day is still locked', 403)
+    if (seq <= e.completedDays) return { ok: true, completedDays: e.completedDays }
+    const updated = await this.db.programEnrollment.update({ where: { id }, data: { completedDays: seq } })
+    return { ok: true, completedDays: updated.completedDays }
   }
 
   @Get('enrollments/:id')

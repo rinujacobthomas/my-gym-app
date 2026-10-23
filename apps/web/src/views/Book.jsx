@@ -11,6 +11,11 @@ import { Button, Section, Switch } from '../components/ui.jsx'
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+// The API numbers weekdays Mon=0 … Sun=6; WD above is JS getDay() order (Sun=0).
+const srvDay = wd => (wd + 6) % 7
+
+// Same rule as the API: a slot takes bookings until 15 minutes before it ends.
+const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() }
 
 const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
 
@@ -36,7 +41,7 @@ function Capacity({ slot }) {
   </div>
 }
 
-function SlotCard({ slot, myBooking, onBook, onCancel, onJoinWl, onLeaveWl }) {
+function SlotCard({ slot, myBooking, closed, onBook, onCancel, onJoinWl, onLeaveWl }) {
   const mine = slot.mine
   const booked = mine && mine.status !== 'CANCELLED'
   const waitlisted = slot.waitlistPosition != null || slot._wlPending
@@ -48,26 +53,28 @@ function SlotCard({ slot, myBooking, onBook, onCancel, onJoinWl, onLeaveWl }) {
       </div>
       <div className="shrink-0 flex flex-col items-end gap-1.5">
         {booked && <Chip s={mine.status === 'BOOKED' || !mine.status ? 'BOOKED' : mine.status} />}
-        {booked && myBooking && myBooking.canCancel === false && <span className="text-[11px] text-label-3">{t('cutoff passed')}</span>}
-        {!booked && slot.full && <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium text-red bg-[color-mix(in_srgb,var(--red)_15%,transparent)]">{t('FULL')}</span>}
+        {!booked && closed && <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium text-label-3 bg-surface-2">{t('Closed')}</span>}
+        {!booked && !closed && slot.full && <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium text-red bg-[color-mix(in_srgb,var(--red)_15%,transparent)]">{t('FULL')}</span>}
         {waitlisted && !booked && (slot.waitlistPosition != null
           ? <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium text-yellow bg-[color-mix(in_srgb,var(--yellow)_18%,transparent)]">#{slot.waitlistPosition} · {t('in line')}</span>
           : <span className="inline-flex rounded-md px-[7px] py-[3px] text-[12px] font-medium text-label-3 bg-surface-2">{t('Joining…')}</span>)}
       </div>
     </div>
     <div className="flex items-center gap-2 mt-2.5"><Capacity slot={slot} /></div>
-    {!booked && !slot.full && slot.walkInRemaining > 0 && (
-      <div className="text-label-3 text-[13px] leading-[1.38] mt-1.5">{t('{0} walk-in spots left', slot.walkInRemaining)}</div>
+    {!booked && !closed && !slot.full && slot.walkInRemaining > 0 && (
+      <div className="text-label-3 text-[13px] leading-[1.38] mt-1.5">{t('{0} spots left', slot.walkInRemaining)}</div>
     )}
-    <div className="flex gap-2 mt-3">
-      {booked
+    {!(closed && !booked) && <div className="flex gap-2 mt-3">
+      {booked && myBooking && myBooking.status === 'CHECKED_IN'
+        ? <span className="text-[13px] text-green font-medium">{t('Checked in')}</span>
+        : booked
         ? <Button size="sm" variant="danger" onClick={() => onCancel(slot)}>{t('Cancel booking')}</Button>
         : <>
           {!slot.full && !waitlisted && <Button size="sm" variant="primary" onClick={() => onBook(slot)}>{t('Book')}</Button>}
           {slot.full && !waitlisted && <Button size="sm" variant="tinted" onClick={() => onJoinWl(slot)}>{t('Join waitlist')}</Button>}
           {waitlisted && <Button size="sm" onClick={() => onLeaveWl(slot)}>{t('Leave waitlist')}</Button>}
         </>}
-    </div>
+    </div>}
   </div>
 }
 
@@ -104,7 +111,8 @@ export default function Book() {
     setSlot(slot.id, s => ({ ...s, booked: s.booked + 1, full: s.booked + 1 >= s.capacity, mine: { bookingId: 'pending', status: 'BOOKED' }, waitlistPosition: null }))
     try {
       const res = await api('/api/bookings', { method: 'POST', body: JSON.stringify({ slotId: slot.id }) })
-      setSlot(snap.id, s => ({ ...s, mine: { bookingId: (res && res.id) || 'ok', status: (res && res.status) || 'BOOKED' }, _wlPending: false }))
+      const bk = res && res.booking
+      setSlot(snap.id, s => ({ ...s, mine: { bookingId: bk ? bk.id : 'pending', status: bk ? bk.status : 'BOOKED' }, _wlPending: false }))
       toast(t('Booked — see you there 💪'))
       qc.invalidateQueries({ queryKey: ['slots'] })
       qc.invalidateQueries({ queryKey: qk.myBookings })
@@ -117,7 +125,7 @@ export default function Book() {
   const cancelSlotBooking = slot => {
     const bid = slot.mine && slot.mine.bookingId
     const rec = myBookings.find(b => b.id === bid)
-    if (rec && rec.canCancel === false) { toast(t('Cancellation cutoff passed — ask the front desk.')); return }
+    if (rec && rec.canCancel === false) { toast(t('This slot has already ended.')); return }
     confirmSheet({
       title: t('Cancel this booking?'),
       message: t('{0} · {1} – {2}', fmtDate(iso, true), hhmm(slot.startMin), hhmm(slot.endMin)),
@@ -173,11 +181,12 @@ export default function Book() {
     return [...seen.values()].sort((a, b) => a.startMin - b.startMin)
   }, [timesQ.data])
 
-  const patterns = (patternsQ.data && patternsQ.data.patterns) || []
-  const patOf = wd => patterns.find(p => p.weekday === wd)
+  // GET returns a plain array; PUT replaces the whole set, so every save must send all days.
+  const patterns = Array.isArray(patternsQ.data) ? patternsQ.data : []
+  const patOf = wd => patterns.find(p => p.weekday === srvDay(wd))
 
   const savePat = next => {
-    qc.setQueryData(qk.patterns, d => ({ ...(d || { patterns: [] }), patterns: next }))
+    qc.setQueryData(qk.patterns, next)
     api('/api/bookings/patterns', { method: 'PUT', body: JSON.stringify({ patterns: next }) })
       .catch(() => { qc.invalidateQueries({ queryKey: qk.patterns }); toast(t('Could not save auto-book settings')) })
   }
@@ -185,14 +194,15 @@ export default function Book() {
   const toggleDay = wd => {
     const cur = patOf(wd)
     savePat(cur
-      ? patterns.map(p => p.weekday === wd ? { ...p, active: !p.active } : p)
-      : [...patterns, { weekday: wd, startMin: timeOpts[0] ? timeOpts[0].startMin : 0, endMin: timeOpts[0] ? timeOpts[0].endMin : 0, active: true }])
+      ? patterns.map(p => p.weekday === srvDay(wd) ? { ...p, active: !p.active } : p)
+      : [...patterns, { weekday: srvDay(wd), startMin: timeOpts[0] ? timeOpts[0].startMin : 0, endMin: timeOpts[0] ? timeOpts[0].endMin : 0, active: true }])
   }
 
-  const setTimeFor = (wd, o) => savePat(patterns.map(p => p.weekday === wd ? { ...p, startMin: o.startMin, endMin: o.endMin, active: true } : p))
+  const setTimeFor = (wd, o) => savePat(patterns.map(p => p.weekday === srvDay(wd) ? { ...p, startMin: o.startMin, endMin: o.endMin, active: true } : p))
 
+  // canCancel is the server's "booked and not over yet" — past visits and no-shows stay out.
   const upcoming = myBookings
-    .filter(b => b.status !== 'CANCELLED')
+    .filter(b => b.status === 'BOOKED' && b.canCancel)
     .sort((a, b) => ((a.slot.date + hhmm(a.slot.startMin)) < (b.slot.date + hhmm(b.slot.startMin)) ? -1 : 1))
 
   return <div>
@@ -233,7 +243,7 @@ export default function Book() {
     </div>}
 
     {!slotsQ.isPending && !slotsQ.error && slots.map(s => (
-      <SlotCard key={s.id} slot={s} myBooking={bookingFor(s)}
+      <SlotCard key={s.id} slot={s} myBooking={bookingFor(s)} closed={iso === todayISO() && s.endMin <= nowMin() + 15}
         onBook={book} onCancel={cancelSlotBooking} onJoinWl={joinWl} onLeaveWl={leaveWl} />
     ))}
 
@@ -244,7 +254,6 @@ export default function Book() {
           <span className="w-[29px] h-[29px] rounded-[7px] shrink-0 text-[17px] flex items-center justify-center text-white bg-green"><Icon name="check" /></span>
           <div className="flex-1 min-w-0">
             <div className="text-[17px] tracking-[-.012em] leading-[1.25] truncate">{fmtDate(b.slot.date, true)} · {hhmm(b.slot.startMin)} – {hhmm(b.slot.endMin)}</div>
-            {b.canCancel === false && <div className="text-[13px] text-label-3 leading-[1.3] mt-px">{t('Cancellation cutoff passed')}</div>}
           </div>
           <Chip s={b.status || 'BOOKED'} />
           <button className="rounded-full shrink-0 bg-surface-2 text-label w-9 h-9 flex items-center justify-center transition-[background-color,transform] duration-150 active:bg-surface-3 active:scale-90 no-tap" onClick={() => nav('/qr')} aria-label={t('Check-in QR')}><Icon name="key" /></button>
@@ -256,9 +265,7 @@ export default function Book() {
     </Section>
 
     <Section title={t('Weekly auto-book')}
-      footer={timeOpts.length
-        ? t('We auto-book your usual slot when generation runs nightly.')
-        : t('We auto-book your usual slot when generation runs nightly. No slot times found for today yet.')}>
+      footer={t('Turn on the days you usually train and pick a time. Every night we book that time for the next day, if there is room.')}>
       {WEEK_ORDER.map(wd => {
         const pat = patOf(wd)
         const on = !!(pat && pat.active)

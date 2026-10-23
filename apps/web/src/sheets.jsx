@@ -7,6 +7,8 @@ import { lastEntryFor, bestWeightFor, buildSets, effectiveRoutineId, workoutVolu
 import { beep, vibrate } from './lib/sound.js'
 import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
 import { nav } from './lib/nav.js'
+import { syncWorkoutLog } from './lib/wlog.js'
+import { api } from './lib/api.js'
 import { starterRoutines } from './lib/starter.js'
 import Media, { Thumb } from './components/Media.jsx'
 import Stepper from './components/Stepper.jsx'
@@ -846,12 +848,14 @@ export function WorkoutRow({ w, onClick }) {
 }
 
 /* ============================ workout lifecycle ============================ */
-export function startFlow(routineId) {
-  bwSheet({ required: true, onDone: bw => beginWorkout(routineId, bw) })
+// `program` = { routine, enrollmentId, seq } starts a coach-assigned program day instead of
+// one of the member's own routines; finishing it reports the day back to the coach.
+export function startFlow(routineId, program) {
+  bwSheet({ required: true, onDone: bw => beginWorkout(routineId, bw, program) })
 }
-export function beginWorkout(routineId, bw) {
+export function beginWorkout(routineId, bw, program) {
   const st = S()
-  const r = routineId ? st.routines.find(x => x.id === routineId) : null
+  const r = program ? program.routine : routineId ? st.routines.find(x => x.id === routineId) : null
   // The prescription is applied as the session is built, so you walk up to the bar with the
   // right weight already on the screen instead of being told about it afterwards. `plan` is
   // kept on the entry purely so the workout can explain the number it chose.
@@ -860,7 +864,8 @@ export function beginWorkout(routineId, bw) {
     return { id: cfg.id, sg: cfg.sg, target: { ...cfg }, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
   })
   update(s => {
-    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
+    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId: program ? null : routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries,
+      ...(program ? { program: { enrollmentId: program.enrollmentId, seq: program.seq } } : {}) }
   })
   useUI.getState().stopRest()
   nav('/workout')
@@ -992,6 +997,10 @@ function doFinishWorkout() {
   useUI.getState().stopRest()
   beep(snd(), 880, 0.15); beep(snd(), 1100, 0.15, 0.18); beep(snd(), 1320, 0.3, 0.36)
   syncWorkoutLog(w)   // server is the source of truth for history — queue + POST, offline-safe
+  if (A.program) {
+    api('/api/enrollments/' + A.program.enrollmentId + '/complete', { method: 'POST', body: JSON.stringify({ seq: A.program.seq }) })
+      .catch(() => {})
+  }
   ui().openSheet(close => <FinishSummary w={w} prs={prs} e1prs={e1prs} close={close} />, { kind: 'center', locked: true })
 }
 

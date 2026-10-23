@@ -313,7 +313,7 @@ function RecordModal({ onClose, onDone }) {
               <div className="mt-1.5 bg-surface rounded-xl overflow-hidden max-h-[210px] overflow-y-auto">
                 {searching && results.length === 0 && <SkelList n={2} h={46} />}
                 {results.map(u => (
-                  <button key={u.id} onClick={() => { setPicked(u); setQ(''); setResults([]) }}
+                  <button key={u.id} onClick={() => { setPicked(u); setQ(''); setDq('') }}
                     className="lrow w-full flex items-center gap-2.5 px-3 py-2 text-left no-tap active:bg-surface-2">
                     <Avatar name={u.name} url={u.avatarUrl} size={30} />
                     <span className="flex-1 min-w-0">

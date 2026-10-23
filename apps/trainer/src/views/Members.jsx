@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ptBookings, listPrograms, qk } from '@og/api-client'
+import { ptBookings, listPrograms, searchMembers, qk } from '@og/api-client'
 import { todayISO, fmtDate } from '@og/core'
 import Icon from '@og/ui'
 import { SearchField } from '@og/ui'
@@ -10,6 +10,10 @@ import { PageHead, Empty, SkelList, Avatar, errText, toast } from '../components
 export default function Members() {
   const nav = useNavigate()
   const [q, setQ] = useState('')
+  const [dq, setDq] = useState('')
+  useEffect(() => { const tm = setTimeout(() => setDq(q.trim()), 300); return () => clearTimeout(tm) }, [q])
+  // Anyone in the gym, not just PT clients — coaches program for floor members too.
+  const searchQ = useQuery({ queryKey: ['staff', 'members', dq], queryFn: () => searchMembers(dq), enabled: dq.length >= 2 })
 
   const rowsQ = useQuery({ queryKey: qk.ptBookings, queryFn: ptBookings })
   const programsQ = useQuery({ queryKey: qk.programs, queryFn: listPrograms })
@@ -41,22 +45,24 @@ export default function Members() {
   }, [groups, q])
 
   const myPrograms = (programsQ.data || []).filter(p => p.mine !== false)
+  const clientIds = new Set(groups.map(g => g.id))
+  const others = dq.length >= 2 ? (searchQ.data || []).filter(m => !clientIds.has(m.id)) : []
 
   return (
     <div>
       <PageHead title="Members" sub={rows ? groups.length + ' client' + (groups.length === 1 ? '' : 's') : 'Your clients'} />
 
       <div className="mb-4">
-        <SearchField value={q} onChange={e => setQ(e.target.value)} onClear={() => setQ('')} placeholder="Search clients" />
+        <SearchField value={q} onChange={e => setQ(e.target.value)} onClear={() => setQ('')} placeholder="Search any member by name or email" />
       </div>
 
       {rowsQ.isPending ? (
         <SkelList n={4} h={62} />
       ) : groups.length === 0 ? (
-        <Empty icon="person" title="No PT clients yet"
-          hint="Clients appear here once they book a personal training session with you. Program enrollments are managed under Programs." />
+        !q.trim() && <Empty icon="person" title="No PT clients yet"
+          hint="Clients who book 1-on-1 sessions with you show up here. Search above to find any other member." />
       ) : filtered.length === 0 ? (
-        <Empty icon="magnifier" title={'No match for “' + q.trim() + '”'} />
+        !others.length && <Empty icon="magnifier" title={'No match for “' + q.trim() + '”'} />
       ) : (
         <div className="bg-surface rounded-[14px] overflow-hidden mb-6">
           {filtered.map(g => (
@@ -77,6 +83,26 @@ export default function Members() {
         </div>
       )}
 
+      {others.length > 0 && <>
+        <h2 className="text-[13px] font-normal text-label-2 tracking-[-.004em] px-1 pb-[7px]">Other members</h2>
+        <div className="bg-surface rounded-[14px] overflow-hidden mb-6">
+          {others.map(m => (
+            <button key={m.id} onClick={() => nav('/members/' + m.id, { state: { name: m.name, avatarUrl: m.avatarUrl } })}
+              className="lrow relative w-full flex items-center gap-3 text-left px-3.5 py-[11px] min-h-[58px] bg-transparent border-0 no-tap active:bg-surface-2 transition-colors duration-150">
+              <Avatar name={m.name} url={m.avatarUrl} size={38} />
+              <span className="flex-1 min-w-0 flex flex-col gap-px">
+                <span className="text-[16.5px] tracking-[-.012em] truncate">{m.name}</span>
+                <span className="text-[13px] text-label-2 truncate">{m.email}</span>
+              </span>
+              <Icon name="chevronRight" className="text-label-3 text-[15px] shrink-0 [--icon-stroke:2.4]" />
+            </button>
+          ))}
+        </div>
+      </>}
+      {dq.length >= 2 && searchQ.isSuccess && !others.length && !filtered.length && groups.length === 0 && (
+        <Empty icon="magnifier" title={'No member matches “' + dq + '”'} />
+      )}
+
       <h2 className="text-[13px] font-normal text-label-2 tracking-[-.004em] px-1 pb-[7px]">My programs</h2>
       {programsQ.isPending ? (
         <SkelList n={2} h={54} />
@@ -94,9 +120,6 @@ export default function Members() {
           ))}
         </div>
       )}
-      <p className="text-label-3 text-[12px] px-1 pt-[7px] leading-[1.45]">
-        A staff-facing member directory isn't available yet, so this screen lists your training clients and programs.
-      </p>
     </div>
   )
 }

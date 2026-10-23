@@ -76,7 +76,7 @@ export default function Today() {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-5">
-        <Stat label="Booked" value={dayQ.isPending ? '—' : dayQ.data.booked} sub={'of ' + dayQ.data.cap + ' spaces'} />
+        <Stat label="Booked" value={dayQ.data ? dayQ.data.booked : '—'} sub={dayQ.data ? 'of ' + dayQ.data.cap + ' spaces' : undefined} />
         {isToday ? (
           <>
             <Stat label="In gym now" value={cinNow ?? '—'} tone={cinNow ? 'green' : undefined} />
@@ -86,7 +86,7 @@ export default function Today() {
               sub={live ? 'ends in ' + durTxt(live.endMin - nm) : next ? 'in ' + durTxt(next.startMin - nm) : 'no more slots'} />
           </>
         ) : (
-          <Stat label="Capacity" value={dayQ.isPending ? '—' : (dayQ.data.cap ? Math.round(dayQ.data.booked / dayQ.data.cap * 100) + '%' : '—')} sub="booked" />
+          <Stat label="Capacity" value={!dayQ.data ? '—' : (dayQ.data.cap ? Math.round(dayQ.data.booked / dayQ.data.cap * 100) + '%' : '—')} sub="booked" />
         )}
       </div>
 

@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Shared components live outside this app (and reach it through node_modules, which
+   Tailwind skips), so their classes have to be scanned explicitly. */
+@source "../../../packages/ui/src";
 
 /* ============================================================================
    openGym — design tokens + Tailwind theme

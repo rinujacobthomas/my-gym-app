@@ -67,6 +67,7 @@ export default function Membership() {
   const st = statusOf(m)
   const activeish = st && ['ACTIVE', 'EXPIRING', 'GRACE'].includes(m.status)
   const frozen = st && m.status === 'FROZEN'
+  const member = activeish || frozen   // has days on the clock — buying adds to them
 
   const buy = async plan => {
     if (busy) return
@@ -98,7 +99,9 @@ export default function Membership() {
         modal: { ondismiss: () => toast(t('Payment cancelled')) },
       }).open()
     } catch (e) {
-      toast(t('Could not start checkout: {0}', e.message))
+      toast(e.status === 503
+        ? t('Online payment is not available at this gym yet — please pay at the front desk.')
+        : t('Could not start checkout: {0}', e.message))
     } finally { setBusy(null) }
   }
 
@@ -107,8 +110,10 @@ export default function Membership() {
     setBusy('freeze')
     try {
       await api('/api/membership/freeze', { method: 'POST', body: JSON.stringify({ days }) })
-      toast(t('Membership paused — enjoy the break'))
+      toast(t('Membership paused — slots you had booked during the pause were released.'))
       qc.invalidateQueries({ queryKey: qk.membership })
+      qc.invalidateQueries({ queryKey: qk.myBookings })
+      qc.invalidateQueries({ queryKey: ['slots'] })
     } catch (e) {
       toast(e.status === 409 ? t('No freezes left on this plan.') : t('Could not freeze: {0}', e.message))
     } finally { setBusy(null) }
@@ -197,13 +202,13 @@ export default function Membership() {
             </div>
           </div>}
 
-      {(activeish || frozen) && <Section title={t('Freeze')} className="mb-3"
-        footer={t('Pausing keeps your remaining days safe until you are back.')}>
+      {activeish && <Section title={t('Freeze')} className="mb-3"
+        footer={t('Going away? Pause your membership — your end date moves back by the same number of days, so you lose nothing.')}>
         {frozen ? null : <div className="p-3.5">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="w-[150px] shrink-0">
               <Stepper value={days} step={1} decimal={false} unit={t('days')}
-                onChange={v => setDays(Math.min(30, Math.max(1, Math.round(v) || 1)))} />
+                onChange={v => setDays(Math.min(m.freezeMaxDays || 30, Math.max(1, Math.round(v) || 1)))} />
             </div>
             <Button size="sm" variant="tinted" icon="pause" disabled={busy === 'freeze'} onClick={doFreeze}>{t('Freeze for {0} days', days)}</Button>
           </div>
@@ -216,6 +221,7 @@ export default function Membership() {
 
     <div ref={plansRef}>
       <h2 className="block text-[13px] font-normal text-label-2 tracking-[-.004em] px-1 pb-[7px]">{t('Plans')}</h2>
+      {member && <p className="text-[13px] text-label-2 leading-[1.38] px-1 pb-2 -mt-1">{t('Paying now adds the days on top of your current end date — you never lose days by renewing early.')}</p>}
       {plansQ.isPending && <><div className="h-24 bg-surface rounded-xl animate-pulse mb-2" /><div className="h-24 bg-surface rounded-xl animate-pulse mb-2" /></>}
       {plansQ.error && !plansQ.isPending && <div className="bg-surface rounded-[14px] p-5 text-center">
         <div className="text-label-2 text-[13px] mb-2.5">{t('Could not load plans.')}</div>
@@ -234,8 +240,8 @@ export default function Membership() {
             </div>
             {p.description && <div className="text-label-2 text-[13px] leading-[1.38] mt-1.5 flex-1">{p.description}</div>}
             <div className="mt-3">
-              <Button size="sm" variant={activeish ? 'plain' : 'primary'} disabled={busy === p.id} onClick={() => buy(p)}>
-                {activeish ? t('Renew') : t('Buy')}
+              <Button size="sm" variant={member ? 'plain' : 'primary'} disabled={busy === p.id} onClick={() => buy(p)}>
+                {member ? (m.planName === p.name ? t('Renew') : t('Switch to this plan')) : t('Buy')}
               </Button>
             </div>
           </div>

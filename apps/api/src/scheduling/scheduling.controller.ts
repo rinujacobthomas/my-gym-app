@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common'
 import { PrismaService } from '../prisma.service.js'
 import { AuthService } from '../auth/auth.service.js'
-import { CurrentUser, MembershipGuard, ReqUser, Roles, bad, startOfToday } from '../common/guards.js'
+import { CurrentUser, MembershipGuard, ReqUser, Roles, bad, latestMembership, membershipStatus, startOfToday } from '../common/guards.js'
 import { AuditService, SettingsService } from '../common/services.js'
 import { SlotsService } from './slots.service.js'
 
@@ -64,8 +64,15 @@ export class SchedulingController {
     const today = startOfToday()
     if (slot.date < today) throw bad('Slot is in the past')
     if (!(slot.date > today || slot.endMin > this.nowMinutes() + 15)) throw bad('Slot entry closed')
+    // GET /slots materialises any date it's asked about, so the window has to be enforced here.
+    const s = await this.settings.get()
+    const windowDays = Number(s.bookingWindowDays) || 7
+    if (slot.date.getTime() >= today.getTime() + windowDays * 86400000) {
+      throw bad(`Bookings open ${windowDays} days ahead`)
+    }
     try {
       const booking = await this.db.$transaction(async tx => {
+        await this.slots.lockSlot(tx, slotId)
         const bookedCount = await tx.booking.count({
           where: { slotId, status: { in: ['BOOKED', 'CHECKED_IN'] } },
         })
@@ -245,10 +252,19 @@ export class SchedulingController {
     const today = startOfToday()
     const todayISO = today.toISOString().slice(0, 10)
     const candidates = await this.db.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })
+    // Codes roll over at UTC midnight but phones refresh at local midnight, so a code shown
+    // in the early morning can still be yesterday's (UTC) — accept both.
+    const yesterdayISO = new Date(today.getTime() - 86400000).toISOString().slice(0, 10)
     const ownerId = this.auth.parseCheckInCode(code, secret, candidates, todayISO)
+      ?? this.auth.parseCheckInCode(code, secret, candidates, yesterdayISO)
     if (!ownerId) throw bad('Invalid code', 404)
     const owner = await this.db.user.findUnique({ where: { id: ownerId } })
     if (!owner || owner.status !== 'ACTIVE') throw bad('Member account not active', 403)
+    if (owner.role === 'MEMBER') {
+      // Same rule as MembershipGuard: the desk shouldn't wave in a lapsed or frozen member.
+      const st = membershipStatus(await latestMembership(this.db, owner.id))
+      if (!st.ok) throw bad(st.reason === 'frozen' ? `${owner.name}'s membership is frozen` : `${owner.name}'s membership has expired`, 403)
+    }
     const now = new Date()
 
     const todays = await this.db.booking.findMany({

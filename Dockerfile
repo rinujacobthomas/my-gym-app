@@ -64,6 +64,9 @@ COPY --from=deps /app/packages/api-client/node_modules ./packages/api-client/nod
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm turbo run build \
       --filter=@og/web --filter=@og/trainer --filter=@og/admin --filter=@og/api
+# The api package's "files" field ships dist/, generated/, prisma/ and scripts/.
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm --filter=@og/api deploy --legacy /out/api
 
 # ---------------------------------------------------------------------------
 # web runtime: nginx with the three static bundles at fixed prefixes.

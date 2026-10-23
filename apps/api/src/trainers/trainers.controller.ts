@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common'
 import { PrismaService } from '../prisma.service.js'
 import { CurrentUser, MembershipGuard, Public, ReqUser, Roles, bad, startOfToday } from '../common/guards.js'
 import { AuditService } from '../common/services.js'
@@ -23,6 +23,13 @@ export class TrainersController {
       orderBy: { name: 'asc' },
       include: { trainerProfile: { include: { availability: true } } },
     })
+    // Taken times for the coming week (no member details) so the app only offers free sessions.
+    const today = startOfToday()
+    const weekOut = new Date(today.getTime() + 7 * 86400000)
+    const taken = await this.db.ptBooking.findMany({
+      where: { status: 'BOOKED', date: { gte: today, lte: weekOut }, trainerId: { in: users.map(u => u.trainerProfile?.id).filter((x): x is string => !!x) } },
+      select: { trainerId: true, date: true, startMin: true, endMin: true },
+    })
     return users.map(u => {
       const t = u.trainerProfile
       const availability = (t?.availability ?? [])
@@ -30,15 +37,36 @@ export class TrainersController {
         .sort((a, b) => a.weekday - b.weekday || a.startMin - b.startMin || a.endMin - b.endMin)
         .map(a => ({ weekday: a.weekday, startMin: a.startMin, endMin: a.endMin }))
       return {
-        id: u.id,
+        // POST /pt/bookings takes the trainer-profile id; a coach without a profile has no hours yet.
+        id: t?.id ?? null,
+        userId: u.id,
         name: u.name,
         avatarUrl: u.avatarUrl,
         bio: t?.bio ?? null,
         specialties: t?.specialties ?? [],
         bufferMin: t?.bufferMin ?? 10,
         availability,
+        booked: taken.filter(b => b.trainerId === t?.id).map(b => ({ date: b.date.toISOString().slice(0, 10), startMin: b.startMin, endMin: b.endMin })),
       }
     })
+  }
+
+  /** Gym-floor member lookup for coaches and the desk (name/email search, active members only). */
+  @Get('staff/members')
+  @Roles('TRAINER', 'STAFF')
+  async searchMembers(@Query('q') q?: string) {
+    const needle = String(q ?? '').trim().slice(0, 80)
+    if (needle.length < 2) return []
+    const rows = await this.db.user.findMany({
+      where: {
+        role: 'MEMBER', status: 'ACTIVE',
+        OR: [{ name: { contains: needle, mode: 'insensitive' } }, { email: { contains: needle, mode: 'insensitive' } }],
+      },
+      orderBy: { name: 'asc' },
+      take: 20,
+      select: { id: true, name: true, email: true, avatarUrl: true },
+    })
+    return rows
   }
 
   @Get('trainers/me')

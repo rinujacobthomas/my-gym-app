@@ -6,20 +6,43 @@ import { useStore } from '../store/useStore.js'
 import { EXIDX } from '@og/core'
 import { fmtNum } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
+import { startFlow } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
+import { Button } from '../components/ui.jsx'
 
 function exerciseLine(ex, unit) {
   const sets = ex.sets ?? (ex.target && ex.target.sets)
   const reps = ex.reps ?? (ex.target && ex.target.reps)
-  const w = ex.weight ?? ex.weightKg ?? (ex.target && ex.target.weight)
+  const kg = ex.weight ?? ex.weightKg ?? (ex.target && ex.target.weight)
+  const w = kg && unit === 'lb' ? Math.round(kg * 2.2046) : kg
   const sec = ex.sec ?? ex.seconds ?? (ex.target && (ex.target.sec || ex.target.time))
-  const name = (EXIDX[ex.id] && EXIDX[ex.id].n) || ex.name || ex.title || t('Exercise')
+  const exId = ex.exerciseId || ex.id
+  const name = (EXIDX[exId] && EXIDX[exId].n) || ex.name || ex.title || t('Exercise')
   let dose = ''
   if (sets && reps) dose = sets + '×' + reps + (w ? ' @ ' + fmtNum(w) + ' ' + unit : '')
   else if (sets && sec) dose = sets + '×' + sec + 's'
   else if (reps) dose = reps + '×'
   else if (sec) dose = sec + 's'
   return { name, dose }
+}
+
+// A program day as a one-off routine the workout screen can run (weights in the member's unit).
+function dayRoutine(prog, day, unit) {
+  const toUnit = kg => (kg ? (unit === 'lb' ? Math.round(kg * 2.2046) : kg) : 0)
+  return {
+    id: 'program-' + day.id,
+    name: (prog.title || t('Program')) + ' · ' + (day.label || t('Day {0}', day.seq)),
+    ex: (day.exercises || []).filter(x => EXIDX[x.exerciseId]).map(x => {
+      const mode = x.mode === 'time' || x.mode === 'cardio' ? x.mode : 'reps'
+      const cfg = { id: x.exerciseId, sets: x.sets || 1, mode, weight: toUnit(x.weightKg) }
+      if (mode === 'reps') cfg.reps = x.reps || 10
+      if (mode === 'time') cfg.sec = x.sec || 30
+      if (mode === 'cardio') { cfg.min = x.min || 20; cfg.speed = x.speed || 8 }
+      if (x.bodyweight) cfg.bodyweight = true
+      if (x.perSide) cfg.perSide = true
+      return cfg
+    }),
+  }
 }
 
 function ProgramCard({ en, unit }) {
@@ -29,6 +52,10 @@ function ProgramCard({ en, unit }) {
   const done = en.completedDays || 0
   const unlocked = Math.max(done, en.unlockedDays || 0)
   const [openWeek, setOpenWeek] = useState(null)
+  const days = weeks.flatMap(w => w.days || [])
+  const nextDay = days.find(d => d.seq === done + 1) || null
+  const nextOpen = nextDay && nextDay.seq <= unlocked
+  const active = useStore(s => s.S.active)
 
   return <div className="bg-surface rounded-[14px] p-4 mb-3 min-w-0">
     <div className="flex items-start justify-between gap-2">
@@ -42,8 +69,17 @@ function ProgramCard({ en, unit }) {
         <span className="h-full bg-green" style={{ width: (totalDays ? (done / totalDays) * 100 : 0) + '%' }} />
         <span className="h-full bg-acc opacity-40" style={{ width: (totalDays ? (Math.min(unlocked, totalDays) - done) / totalDays * 100 : 0) + '%' }} />
       </span>
-      <span className="text-label-3 text-[13px] shrink-0">{t('{0} unlocked', Math.max(0, unlocked - done))}</span>
+      {unlocked - done > 1 && <span className="text-label-3 text-[13px] shrink-0">{t('{0} unlocked', unlocked - done)}</span>}
     </div>
+
+    {totalDays > 0 && done >= totalDays
+      ? <div className="text-green text-[14px] font-medium mb-2.5">{t('Program complete — great work! Ask your coach what is next.')}</div>
+      : nextDay && (nextOpen
+        ? <Button variant="primary" icon="play" className="mb-2.5" disabled={!!active}
+            onClick={() => startFlow(null, { routine: dayRoutine(prog, nextDay, unit), enrollmentId: en.enrollmentId, seq: nextDay.seq })}>
+            {t('Start {0}', nextDay.label || t('Day {0}', nextDay.seq))}
+          </Button>
+        : <div className="text-label-2 text-[13px] leading-[1.38] mb-2.5">{t('Next up: {0} — your coach will unlock it when you are ready.', nextDay.label || t('Day {0}', nextDay.seq))}</div>)}
 
     {weeks.map((week, wi) => {
       const open = openWeek === wi
@@ -87,7 +123,8 @@ function ProgramCard({ en, unit }) {
 export default function Programs() {
   const nav = useNavigate()
   const unit = useStore(s => s.S.unit)
-  const Q = useQuery({ queryKey: qk.assignedPrograms, queryFn: () => api('/api/programs/assigned') })
+  // always refetch on open: finishing a program day (in the workout flow) moves progress on
+  const Q = useQuery({ queryKey: qk.assignedPrograms, queryFn: () => api('/api/programs/assigned'), refetchOnMount: 'always' })
   const list = Q.data || []
 
   return <div>

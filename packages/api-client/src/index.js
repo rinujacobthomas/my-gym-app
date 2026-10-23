@@ -90,6 +90,8 @@ export const listTrainers = () => api('/api/trainers')
 export const myTrainerProfile = () => api('/api/trainers/me')
 export const updateTrainerProfile = p => put('/api/trainers/me', p)
 export const ptBookings = () => api('/api/pt/bookings')
+/** Staff-only: active members matching a name/email fragment (≥ 2 chars). */
+export const searchMembers = q => api('/api/staff/members?q=' + encodeURIComponent(q))
 export const bookPt = b => post('/api/pt/bookings', b)
 
 /* ---------- programs ---------- */

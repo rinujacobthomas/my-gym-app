@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma.service.js'
+import { Prisma } from '#prisma'
 import { startOfToday } from '../common/guards.js'
 import { SettingsService } from '../common/services.js'
 
@@ -45,10 +46,20 @@ export class SlotsService {
     )
   }
 
+  /**
+   * Row-locks a slot for the rest of the transaction. Capacity checks are count-then-insert,
+   * which two concurrent requests can both pass under READ COMMITTED; serialising on the slot
+   * row makes the second one see the first one's seat.
+   */
+  async lockSlot(tx: Prisma.TransactionClient, slotId: string) {
+    await tx.$queryRaw`SELECT id FROM "SlotInstance" WHERE id = ${slotId} FOR UPDATE`
+  }
+
   /** Promotes the head of the waitlist into a freed seat. Returns the promoted userId or null. */
   async promoteFromWaitlist(slotInstanceId: string): Promise<string | null> {
     return this.db
       .$transaction(async tx => {
+        await this.lockSlot(tx, slotInstanceId)
         const slot = await tx.slotInstance.findUnique({ where: { id: slotInstanceId } })
         if (!slot) return null
         const booked = await tx.booking.count({

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, qk } from '@og/api-client'
 import { useUI } from '../store/useUI.js'
+import { useStore } from '../store/useStore.js'
+import { lastBW } from '../lib/history.js'
 import { todayISO, isoOf, fmtNum, uid } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
 import { confirmSheet } from '../sheets.jsx'
@@ -76,7 +78,8 @@ export default function NutritionView() {
   const [panelMeal, setPanelMeal] = useState(null)
   const dayQ = useQuery({ queryKey: qk.nutrition(iso), queryFn: () => api('/api/nutrition?date=' + iso) })
   const entries = (dayQ.data && dayQ.data.entries) || []
-  const water = dayQ.data ? dayQ.data.water || 0 : 0
+  // The API sends { ml }; the optimistic updates below write a plain number.
+  const water = Number(dayQ.data && dayQ.data.water != null && typeof dayQ.data.water === 'object' ? dayQ.data.water.ml : dayQ.data?.water) || 0
   const target = dayQ.data ? dayQ.data.target : null
 
   const shiftDate = n => {
@@ -128,7 +131,7 @@ export default function NutritionView() {
 
   const addWater = async ml => {
     const prev = water
-    qc.setQueryData(qk.nutrition(iso), d => d && { ...d, water: (d.water || 0) + ml })
+    qc.setQueryData(qk.nutrition(iso), d => d && { ...d, water: prev + ml })
     try {
       await api('/api/nutrition/water', { method: 'PUT', body: JSON.stringify({ date: iso, ml: prev + ml }) })
       qc.invalidateQueries({ queryKey: qk.nutrition(iso) })
@@ -218,7 +221,10 @@ export default function NutritionView() {
 function TdeeCard({ iso }) {
   const toast = useUI(s => s.toast)
   const qc = useQueryClient()
-  const [w, setW] = useState(70)
+  const bw = useStore(s => lastBW(s.S))
+  const unit = useStore(s => s.S.unit)
+  // start from the member's own last weigh-in (the calculator works in kg)
+  const [w, setW] = useState(() => bw ? Math.round(unit === 'lb' ? bw.w * 0.4536 : bw.w) : 70)
   const [h, setH] = useState(170)
   const [age, setAge] = useState(30)
   const [sex, setSex] = useState('male')
@@ -251,7 +257,7 @@ function TdeeCard({ iso }) {
     <div className="flex items-center justify-between mb-3">
       <h2 className="text-[13px] font-normal tracking-[-.004em] text-label-2 m-0">{t('Calorie target calculator')}</h2>
     </div>
-    <div className="grid grid-cols-3 gap-2">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
       <Stepper label={t('Weight')} unit="kg" value={w} step={1} decimal={false} onChange={v => setW(Math.max(20, Math.min(300, Math.round(v) || 1)))} />
       <Stepper label={t('Height')} unit="cm" value={h} step={1} decimal={false} onChange={v => setH(Math.max(80, Math.min(250, Math.round(v) || 1)))} />
       <Stepper label={t('Age')} value={age} step={1} decimal={false} onChange={v => setAge(Math.max(10, Math.min(100, Math.round(v) || 1)))} />
@@ -315,6 +321,10 @@ function AddFoodPanel({ meal, close, addEntry }) {
   </div>
 }
 
+// Favorites are stored with the API's macro names (per 100 g); the pickers below speak the
+// Open Food Facts *100 names, so translate on the way in.
+const normFav = f => ({ ...f, kcal100: f.kcal100 ?? f.kcal, protein100: f.protein100 ?? f.proteinG, carbs100: f.carbs100 ?? f.carbsG, fat100: f.fat100 ?? f.fatG })
+
 const productToEntry = (p, meal) => ({
   meal,
   name: p.name || p.product_name || t('Food'),
@@ -330,7 +340,7 @@ function OffSearch({ meal, addEntry }) {
   const toast = useUI(s => s.toast)
   const qc = useQueryClient()
   const favQ = useQuery({ queryKey: qk.favorites, queryFn: () => api('/api/nutrition/favorites') })
-  const favs = favQ.data || []
+  const favs = (favQ.data || []).map(normFav)
   const [q, setQ] = useState('')
   const [dq, setDq] = useState('')
 
@@ -353,12 +363,13 @@ function OffSearch({ meal, addEntry }) {
 
   const clear = () => { setQ(''); setDq('') }
 
-  const isFav = p => favs.some(f => (f.offId || f.id) === p.id)
+  const sameFood = (f, p) => (f.offId && f.offId === p.id) || f.name === p.name
+  const isFav = p => favs.some(f => sameFood(f, p))
   const toggleFav = async p => {
-    const ex = favs.find(f => (f.offId || f.id) === p.id)
+    const ex = favs.find(f => sameFood(f, p))
     if (ex) {
-      const snap = favs
-      qc.setQueryData(qk.favorites, d => (d || []).filter(f => f !== ex))
+      const snap = favQ.data
+      qc.setQueryData(qk.favorites, d => (d || []).filter(f => f.id !== ex.id))
       try {
         await api('/api/nutrition/favorites/' + ex.id, { method: 'DELETE' })
         qc.invalidateQueries({ queryKey: qk.favorites })
@@ -368,10 +379,10 @@ function OffSearch({ meal, addEntry }) {
       const tmp = { offId: p.id, id: 'tmp-fav-' + (p.offId || p.id), name: p.name, kcal100: p.kcal100, protein100: p.protein100, carbs100: p.carbs100, fat100: p.fat100, servingSize: p.servingSize }
       qc.setQueryData(qk.favorites, d => [...(d || []), tmp])
       try {
-        await api('/api/nutrition/favorites', { method: 'POST', body: JSON.stringify({ offId: p.id, name: p.name, kcal100: p.kcal100, protein100: p.protein100, carbs100: p.carbs100, fat100: p.fat100, servingSize: p.servingSize }) })
+        await api('/api/nutrition/favorites', { method: 'POST', body: JSON.stringify({ meal, name: p.name, kcal: p.kcal100 || 0, proteinG: p.protein100 || 0, carbsG: p.carbs100 || 0, fatG: p.fat100 || 0 }) })
         qc.invalidateQueries({ queryKey: qk.favorites })
       }
-      catch { qc.setQueryData(qk.favorites, d => (d || []).filter(f => f !== tmp)); toast(t('Could not update favorites')) }
+      catch { qc.setQueryData(qk.favorites, d => (d || []).filter(f => f.id !== tmp.id)); toast(t('Could not update favorites')) }
     }
   }
 
@@ -524,11 +535,11 @@ function Favorites({ meal, addEntry }) {
   const toast = useUI(s => s.toast)
   const qc = useQueryClient()
   const favQ = useQuery({ queryKey: qk.favorites, queryFn: () => api('/api/nutrition/favorites') })
-  const favs = favQ.data || []
+  const favs = (favQ.data || []).map(normFav)
 
   const removeFav = async f => {
     const snap = favQ.data
-    qc.setQueryData(qk.favorites, d => (d || []).filter(x => x !== f))
+    qc.setQueryData(qk.favorites, d => (d || []).filter(x => x.id !== f.id))
     try {
       await api('/api/nutrition/favorites/' + f.id, { method: 'DELETE' })
       qc.invalidateQueries({ queryKey: qk.favorites })
