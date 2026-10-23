@@ -26,7 +26,7 @@ export class MembershipController {
   @Get('membership/me')
   async me(@CurrentUser() u: ReqUser) {
     if (u.role !== 'MEMBER') return { status: 'STAFF', endDate: null }
-    const m = await latestMembership(this.db, u.id)
+    const [m, s] = await Promise.all([latestMembership(this.db, u.id), this.settings.get()])
     const st = membershipStatus(m)
     const i = st.info
     return {
@@ -35,6 +35,8 @@ export class MembershipController {
       startDate: isoDate(i.startDate ?? null),
       frozenUntil: isoDate(i.frozenUntil ?? null),
       freezesUsed: i.freezesUsed ?? 0,
+      freezesMax: s.freezeMaxPerYear ?? 2,
+      freezeMaxDays: s.freezeMaxDays ?? 30,
       daysLeft: i.daysLeft ?? null,
       planName: i.planName ?? null,
     }
@@ -49,9 +51,12 @@ export class MembershipController {
     const m = await latestMembership(this.db, u.id)
     const st = membershipStatus(m)
     if (!m || (st.info.status !== 'ACTIVE' && st.info.status !== 'EXPIRING')) throw bad('Membership must be active to freeze')
-    if ((m.freezesUsed ?? 0) >= (s.freezeMaxPerYear ?? 2)) throw bad('Freeze limit reached for this membership year')
-    const frozenUntil = new Date(startOfToday().getTime() + days * DAY_MS)
-    await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil, freezesUsed: { increment: 1 } } })
+    if ((m.freezesUsed ?? 0) >= (s.freezeMaxPerYear ?? 2)) throw bad('Freeze limit reached for this membership year', 409)
+    // Frozen through frozenUntil inclusive, so the pause covers exactly `days` calendar days
+    // starting today — and the end date moves out by the same amount, so no paid day is lost.
+    const frozenUntil = new Date(startOfToday().getTime() + (days - 1) * DAY_MS)
+    const endDate = new Date(new Date(m.endDate).getTime() + days * DAY_MS)
+    await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil, endDate, freezesUsed: { increment: 1 } } })
     this.audit.log(u.id, 'membership.freeze', 'Membership', m.id, { days, frozenUntil })
     const updated = await latestMembership(this.db, u.id)
     return membershipStatus(updated).info
@@ -61,8 +66,12 @@ export class MembershipController {
   @Post('membership/unfreeze')
   async unfreeze(@CurrentUser() u: ReqUser) {
     const m = await latestMembership(this.db, u.id)
-    if (!m || !m.frozenUntil || new Date(m.frozenUntil) < startOfToday()) throw bad('No active freeze')
-    await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil: null } })
+    const today = startOfToday()
+    if (!m || !m.frozenUntil || new Date(m.frozenUntil) < today) throw bad('No active freeze')
+    // Ending early hands back the frozen days that haven't happened yet (today counts as used).
+    const unused = Math.max(0, Math.round((new Date(m.frozenUntil).getTime() - today.getTime()) / DAY_MS))
+    const endDate = new Date(new Date(m.endDate).getTime() - unused * DAY_MS)
+    await this.db.membership.update({ where: { id: m.id }, data: { frozenUntil: null, endDate } })
     this.audit.log(u.id, 'membership.unfreeze', 'Membership', m.id, { frozenUntil: m.frozenUntil })
     const updated = await latestMembership(this.db, u.id)
     return membershipStatus(updated).info
@@ -179,7 +188,13 @@ export class PaymentsController {
     paidAt: Date = new Date(),
   ) {
     await this.db.$transaction(async tx => {
-      await tx.payment.update({ where: { id: paymentRowId }, data: { status: 'PAID', razorpayPaymentId, paidAt } })
+      // Checkout verify and the webhook routinely race each other. The conditional update takes
+      // the row lock and re-checks status, so only one of them ever extends the membership.
+      const claimed = await tx.payment.updateMany({
+        where: { id: paymentRowId, status: { not: 'PAID' } },
+        data: { status: 'PAID', razorpayPaymentId, paidAt },
+      })
+      if (!claimed.count) return
       const m = await this.extendMembership(tx as Prisma.TransactionClient, userId, planId, durationDays)
       await tx.payment.update({ where: { id: paymentRowId }, data: { membershipId: m.id } })
     })

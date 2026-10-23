@@ -8,6 +8,10 @@ export interface ReqUser { id: string; email: string; name: string; role: Role; 
 export const IS_PUBLIC_KEY = 'isPublic'
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
 
+/** Lets a signed-in but not-yet-approved (PENDING) account through — waiting-room endpoints only. */
+export const ALLOW_PENDING_KEY = 'allowPending'
+export const AllowPending = () => SetMetadata(ALLOW_PENDING_KEY, true)
+
 export const ROLES_KEY = 'roles'
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles)
 
@@ -36,17 +40,25 @@ export class SessionGuard implements CanActivate {
   }
 }
 
-/** Role gate. No @Roles() metadata = any ACTIVE authenticated account. */
+/**
+ * Role gate. No @Roles() metadata = any ACTIVE authenticated account.
+ * PENDING accounts are stopped here on every route except those marked @AllowPending().
+ */
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
   canActivate(ctx: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [ctx.getHandler(), ctx.getClass()])
-    if (!required?.length) return true
+    const targets = [ctx.getHandler(), ctx.getClass()]
+    if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets)) return true
     const req = ctx.switchToHttp().getRequest()
     const u: ReqUser | undefined = req.user
     if (!u) throw new UnauthorizedException({ error: 'Not signed in' })
-    if (u.status !== 'ACTIVE') throw new ForbiddenException({ error: 'Account not active', pending: u.status === 'PENDING', silent: false })
+    const allowPending = this.reflector.getAllAndOverride<boolean>(ALLOW_PENDING_KEY, targets)
+    if (u.status !== 'ACTIVE' && !(allowPending && u.status === 'PENDING')) {
+      throw new ForbiddenException({ error: 'Account not active', pending: u.status === 'PENDING', silent: false })
+    }
+    const required = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, targets)
+    if (!required?.length) return true
     if (!required.includes(u.role)) {
       // ADMIN passes every role gate.
       if (u.role === 'ADMIN') return true

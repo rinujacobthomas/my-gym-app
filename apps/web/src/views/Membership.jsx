@@ -203,7 +203,7 @@ export default function Membership() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="w-[150px] shrink-0">
               <Stepper value={days} step={1} decimal={false} unit={t('days')}
-                onChange={v => setDays(Math.min(30, Math.max(1, Math.round(v) || 1)))} />
+                onChange={v => setDays(Math.min(m.freezeMaxDays || 30, Math.max(1, Math.round(v) || 1)))} />
             </div>
             <Button size="sm" variant="tinted" icon="pause" disabled={busy === 'freeze'} onClick={doFreeze}>{t('Freeze for {0} days', days)}</Button>
           </div>

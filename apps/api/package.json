@@ -8,7 +8,7 @@
     "dev": "nest start --watch",
     "build": "prisma generate && nest build",
     "start": "node dist/apps/api/src/main.js",
-    "test": "echo no unit tests yet",
+    "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
@@ -32,6 +32,7 @@
     "@types/web-push": "^3.6.4",
     "prisma": "^6.19.0",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }
